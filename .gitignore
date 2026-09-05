@@ -1,0 +1,22 @@
+# secrets — never commit API keys
+.env
+.env.*
+!.env.example
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+build/
+dist/
+
+# OS junk
+.DS_Store
+._*
+Thumbs.db
+
+# editors
+.vscode/
+.idea/

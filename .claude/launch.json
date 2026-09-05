@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "configurations": [
+    {
+      "name": "session-reviewer-app",
+      "runtimeExecutable": "python3",
+      "runtimeArgs": ["app.py", "--no-browser"],
+      "port": 8765
+    }
+  ]
+}

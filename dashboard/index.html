@@ -1,0 +1,677 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Session Reviewer — Dashboard</title>
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #15130f;
+    --bg-elevated: #1c1913;
+    --bg-card: #201c16;
+    --bg-card-hover: #24201a;
+    --border: #332c22;
+    --border-soft: #2a251d;
+    --text: #f2ece1;
+    --text-dim: #ab9f8c;
+    --text-faint: #766c5b;
+    --accent: #d98a52;
+    --accent-strong: #eba46f;
+    --accent-soft: rgba(217, 138, 82, 0.14);
+    --success: #8aa87e;
+    --success-soft: rgba(138, 168, 126, 0.13);
+    --warn: #c9a227;
+    --warn-soft: rgba(201, 162, 39, 0.13);
+    --danger: #c06556;
+    --danger-soft: rgba(192, 101, 86, 0.14);
+    --mono: ui-monospace, "SF Mono", "Cascadia Code", Menlo, Consolas, monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, sans-serif;
+  }
+
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: var(--sans);
+    line-height: 1.5;
+  }
+
+  .wrap { max-width: 1080px; margin: 0 auto; padding: 28px 24px 80px; }
+
+  header.top {
+    display: flex; align-items: center; justify-content: space-between;
+    gap: 20px; flex-wrap: wrap;
+    padding-bottom: 22px; margin-bottom: 26px;
+    border-bottom: 1px solid var(--border-soft);
+  }
+  .brand { display: flex; align-items: center; gap: 12px; }
+  .brand .mark {
+    width: 34px; height: 34px; border-radius: 9px;
+    background: linear-gradient(155deg, var(--accent), #a85f2e);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 16px; font-weight: 700; color: #1a1208; flex: none;
+  }
+  .brand h1 { font-size: 16px; margin: 0; letter-spacing: 0.2px; }
+  .brand p { margin: 2px 0 0; font-size: 12.5px; color: var(--text-faint); }
+
+  .controls { display: flex; gap: 8px; flex-wrap: wrap; }
+  .btn {
+    font: inherit; font-size: 12.5px; font-weight: 600;
+    color: var(--text); background: var(--bg-card);
+    border: 1px solid var(--border); border-radius: 7px;
+    padding: 8px 13px; cursor: pointer; transition: border-color .15s, background .15s;
+  }
+  .btn:hover { background: var(--bg-card-hover); border-color: #443a2c; }
+  .btn.primary { background: var(--accent-soft); border-color: rgba(217,138,82,.4); color: var(--accent-strong); }
+  .btn.primary:hover { background: rgba(217,138,82,.22); }
+  input[type=file] { display: none; }
+
+  .stats {
+    display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+    gap: 12px; margin-bottom: 30px;
+  }
+  .stat {
+    background: var(--bg-card); border: 1px solid var(--border-soft);
+    border-radius: 10px; padding: 14px 16px;
+  }
+  .stat .n { font-size: 24px; font-weight: 700; letter-spacing: -0.3px; }
+  .stat .l { font-size: 11.5px; color: var(--text-faint); text-transform: uppercase; letter-spacing: 0.5px; margin-top: 3px; }
+  .stat.accent .n { color: var(--accent-strong); }
+  .stat.good .n { color: var(--success); }
+  .stat.warn .n { color: var(--warn); }
+
+  section.panel {
+    background: var(--bg-elevated); border: 1px solid var(--border-soft);
+    border-radius: 12px; padding: 18px 20px; margin-bottom: 20px;
+  }
+  section.panel h2 {
+    font-size: 13px; text-transform: uppercase; letter-spacing: 0.6px;
+    color: var(--text-dim); margin: 0 0 14px;
+    display: flex; align-items: center; justify-content: space-between;
+  }
+  .meta-row { font-size: 13px; color: var(--text-dim); margin-bottom: 6px; }
+  .meta-row b { color: var(--text); font-weight: 600; }
+  .meta-row code { font-family: var(--mono); font-size: 12px; background: var(--bg-card); padding: 1px 6px; border-radius: 5px; }
+  .session-list { list-style: none; margin: 10px 0 0; padding: 0; font-size: 12.5px; color: var(--text-dim); }
+  .session-list li { padding: 3px 0; font-family: var(--mono); }
+  .session-list .h { color: var(--accent); }
+
+  .card {
+    background: var(--bg-card); border: 1px solid var(--border-soft);
+    border-left: 3px solid var(--accent); border-radius: 10px;
+    padding: 16px 18px; margin-bottom: 14px;
+  }
+  .card.unsafe { border-left-color: var(--danger); }
+  .card-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; margin-bottom: 10px; }
+  .card-title { font-size: 14.5px; font-weight: 650; margin: 0; }
+  .badge {
+    font-size: 11px; font-weight: 700; padding: 3px 9px; border-radius: 20px;
+    white-space: nowrap; flex: none;
+  }
+  .badge.good { background: var(--success-soft); color: var(--success); }
+  .badge.bad { background: var(--danger-soft); color: var(--danger); }
+
+  .warn-banner {
+    display: flex; gap: 8px; align-items: flex-start;
+    background: var(--danger-soft); border: 1px solid rgba(192,101,86,.35);
+    color: #e3a99d; border-radius: 8px; padding: 9px 12px; font-size: 12.5px;
+    margin-bottom: 12px;
+  }
+  .undersourced-banner {
+    background: var(--warn-soft); border: 1px solid rgba(201,162,39,.35);
+    color: #e0c465; border-radius: 8px; padding: 9px 12px; font-size: 12.5px;
+    margin-bottom: 12px;
+  }
+
+  .instruction {
+    font-family: var(--mono); font-size: 12.5px; color: var(--text);
+    background: var(--bg-elevated); border: 1px solid var(--border-soft);
+    border-radius: 7px; padding: 9px 12px; margin: 8px 0 12px;
+  }
+  .evidence { margin-top: 4px; }
+  .evidence .label { font-size: 11px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-faint); margin-bottom: 6px; }
+  .quote {
+    display: flex; gap: 8px; align-items: baseline; font-size: 12.5px;
+    padding: 5px 0; border-bottom: 1px dashed var(--border-soft);
+  }
+  .quote:last-child { border-bottom: none; }
+  .quote .file { font-family: var(--mono); color: var(--text-faint); flex: none; }
+  .quote .txt { color: var(--text-dim); font-style: italic; }
+  .quote .tag { flex: none; font-size: 10.5px; font-weight: 700; }
+  .quote .tag.ok { color: var(--success); }
+  .quote .tag.bad { color: var(--danger); }
+
+  .web-source { margin-top: 12px; font-size: 12.5px; color: var(--text-dim); }
+  .web-source a { color: var(--accent-strong); text-decoration: none; }
+  .web-source a:hover { text-decoration: underline; }
+
+  table.ledger { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+  table.ledger th, table.ledger td { text-align: left; padding: 7px 10px; border-bottom: 1px solid var(--border-soft); }
+  table.ledger th { color: var(--text-faint); font-weight: 600; text-transform: uppercase; font-size: 10.5px; letter-spacing: 0.4px; }
+  .status-chip { font-size: 10.5px; font-weight: 700; padding: 2px 8px; border-radius: 20px; }
+  .status-chip.accepted { background: var(--success-soft); color: var(--success); }
+  .status-chip.rejected { background: var(--danger-soft); color: var(--danger); }
+  .status-chip.seen { background: var(--bg-elevated); color: var(--text-faint); }
+
+  .empty { text-align: center; padding: 40px 20px; color: var(--text-faint); font-size: 13px; }
+
+  /* --- sidebar + tabs --- */
+  .layout { display: flex; align-items: flex-start; gap: 20px; }
+  aside.sidebar {
+    width: 196px; flex: none; position: sticky; top: 20px;
+    background: var(--bg-elevated); border: 1px solid var(--border-soft);
+    border-radius: 12px; padding: 10px;
+  }
+  .nav-item {
+    display: flex; align-items: center; gap: 10px;
+    padding: 9px 11px; border-radius: 8px; margin-bottom: 2px;
+    font-size: 13px; font-weight: 600; color: var(--text-dim);
+    cursor: pointer; user-select: none; transition: background .12s, color .12s;
+    border: none; background: none; width: 100%; text-align: left; font-family: inherit;
+  }
+  .nav-item svg { width: 16px; height: 16px; flex: none; opacity: .85; }
+  .nav-item:hover { background: var(--bg-card-hover); color: var(--text); }
+  .nav-item.active { background: var(--accent-soft); color: var(--accent-strong); }
+  .nav-item.active svg { opacity: 1; }
+  main.content { flex: 1; min-width: 0; }
+  .tab-panel[hidden] { display: none; }
+
+  /* --- analytics charts --- */
+  .chart-row { display: flex; gap: 16px; flex-wrap: wrap; margin-bottom: 20px; }
+  .chart-card {
+    background: var(--bg-card); border: 1px solid var(--border-soft);
+    border-radius: 10px; padding: 18px; flex: 1; min-width: 260px;
+  }
+  .chart-card h3 { margin: 0 0 14px; font-size: 12.5px; text-transform: uppercase; letter-spacing: 0.5px; color: var(--text-faint); }
+  .donut-card { display: flex; gap: 18px; align-items: center; }
+  .donut { width: 92px; height: 92px; border-radius: 50%; flex: none; position: relative; }
+  .donut .hole {
+    position: absolute; inset: 20px; border-radius: 50%; background: var(--bg-card);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 15px; font-weight: 700;
+  }
+  .legend { font-size: 12px; }
+  .legend-row { display: flex; align-items: center; gap: 7px; margin: 5px 0; color: var(--text-dim); }
+  .legend-row b { color: var(--text); }
+  .legend-dot { width: 9px; height: 9px; border-radius: 50%; flex: none; }
+  .hbar-row { display: flex; align-items: center; gap: 10px; margin: 9px 0; }
+  .hbar-label {
+    width: 150px; flex: none; font-family: var(--mono); font-size: 11.5px;
+    color: var(--text-dim); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .hbar-track { flex: 1; height: 10px; background: var(--bg-elevated); border-radius: 6px; overflow: hidden; display: flex; }
+  .hbar-fill { height: 100%; }
+  .hbar-fill.accent { background: var(--accent); }
+  .hbar-fill.good { background: var(--success); }
+  .hbar-fill.bad { background: var(--danger); }
+  .hbar-count { width: 30px; flex: none; text-align: right; font-size: 11.5px; color: var(--text-faint); }
+
+  footer {
+    text-align: center; font-size: 11.5px; color: var(--text-faint);
+    margin-top: 36px; padding-top: 18px; border-top: 1px solid var(--border-soft);
+  }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <div class="brand">
+      <div class="mark">SR</div>
+      <div>
+        <h1>Session Reviewer</h1>
+        <p id="subtitle">Showing sample data — load your own report to replace it</p>
+      </div>
+    </div>
+    <div class="controls">
+      <label class="btn primary" for="report-input">Load report.md</label>
+      <input type="file" id="report-input" accept=".md,text/markdown,text/plain">
+      <label class="btn" for="ledger-input">Load ledger.json</label>
+      <input type="file" id="ledger-input" accept=".json,application/json">
+      <button class="btn" id="reset-btn">Reset to sample</button>
+    </div>
+  </header>
+
+  <div class="stats" id="stats"></div>
+
+  <div class="layout">
+    <aside class="sidebar">
+      <button class="nav-item active" data-tab="overview">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><rect x="3" y="4" width="18" height="4" rx="1"/><rect x="3" y="11" width="18" height="4" rx="1"/><rect x="3" y="18" width="18" height="2.5" rx="1"/></svg>
+        Overview
+      </button>
+      <button class="nav-item" data-tab="analytics">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20V10"/><path d="M12 20V4"/><path d="M20 20v-7"/></svg>
+        Analytics
+      </button>
+      <button class="nav-item" data-tab="ledger">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="16" rx="2"/><path d="M3 10h18"/><path d="M9 10v10"/></svg>
+        Ledger
+      </button>
+    </aside>
+
+    <main class="content">
+      <section class="tab-panel" data-tab="overview">
+        <section class="panel" id="meta-panel">
+          <h2>Run</h2>
+          <div id="meta-body"></div>
+        </section>
+
+        <section class="panel">
+          <h2>Suggestions <span id="suggestion-count" style="text-transform:none;letter-spacing:0;font-weight:400;"></span></h2>
+          <div id="suggestions"></div>
+        </section>
+      </section>
+
+      <section class="tab-panel" data-tab="analytics" hidden>
+        <div class="chart-row">
+          <div class="chart-card donut-card">
+            <div id="donut-quotes" class="donut"><div class="hole"></div></div>
+            <div>
+              <h3 style="margin-bottom:8px;">Quote verification</h3>
+              <div class="legend" id="legend-quotes"></div>
+            </div>
+          </div>
+          <div class="chart-card donut-card">
+            <div id="donut-ledger" class="donut"><div class="hole"></div></div>
+            <div>
+              <h3 style="margin-bottom:8px;">Suggestion status (ledger)</h3>
+              <div class="legend" id="legend-ledger"></div>
+            </div>
+          </div>
+        </div>
+        <div class="chart-row">
+          <div class="chart-card" style="flex: 1 1 100%;">
+            <h3>Evidence per suggestion (verified vs. not found)</h3>
+            <div id="bars-suggestions"></div>
+          </div>
+        </div>
+        <div class="chart-row">
+          <div class="chart-card" style="flex: 1 1 100%;">
+            <h3>Sessions reviewed by harness</h3>
+            <div id="bars-harness"></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="tab-panel" data-tab="ledger" hidden>
+        <section class="panel">
+          <h2>Ledger</h2>
+          <div id="ledger-body"></div>
+        </section>
+      </section>
+    </main>
+  </div>
+
+  <footer>Runs entirely in your browser — your report and ledger files are read locally and never uploaded anywhere.</footer>
+</div>
+
+<script>
+const SAMPLE_REPORT = `# Session Reviewer report
+
+Project: \`/Users/you/code/myproject\`
+Harnesses: claude-code, codex
+Sessions reviewed (7 of 12 found, most recent first):
+- [claude-code] a1b2c3.jsonl
+- [claude-code] d4e5f6.jsonl
+- [codex] rollout-9f8e7d.jsonl
+- [claude-code] 7c6b5a.jsonl
+- [claude-code] 1a2b3c.jsonl
+- [codex] rollout-4d3e2f.jsonl
+- [claude-code] 9e8d7c.jsonl
+
+Nothing here was written to CLAUDE.md/AGENTS.md unless you pass --apply and accept a suggestion.
+
+---
+
+## Suggestion: Quote glob patterns in shell commands
+**Add to CLAUDE.md:** Always quote glob patterns in grep/find commands — zsh expands them before the command runs and errors on no match.
+**Evidence:**
+- Session a1b2c3.jsonl: "no matches found: *.test.ts" [✓ verified]
+- Session 7c6b5a.jsonl: "zsh: no matches found: src/**/*.spec.js" [✓ verified]
+- Session 9e8d7c.jsonl: "no matches found: *.snap" [✓ verified]
+**Web source:** zsh's nomatch option causes unquoted globs with no matches to abort the command — https://zsh.sourceforge.io/Doc/Release/Options.html
+
+## Suggestion: Check for gh CLI before using it
+**Add to CLAUDE.md:** Verify \`gh\` is installed before relying on it for PR/issue commands.
+**Evidence:**
+- Session d4e5f6.jsonl: "gh: command not found" [✓ verified]
+- Session 1a2b3c.jsonl: "gh: command not found" [✓ verified]
+- Session rollout-4d3e2f.jsonl: "bash: gh: command not found" [⚠️ QUOTE NOT FOUND VERBATIM]
+> ⚠️ WARNING: only 2 distinct session(s) cited above — should be 3 or more. Treat this suggestion with suspicion.
+
+## Suggestion: Run the build before claiming a fix works
+**Add to CLAUDE.md:** After editing TypeScript files, run the build once before saying the change is done.
+**Evidence:**
+- Session a1b2c3.jsonl: "the fix should work now" [✓ verified]
+- Session d4e5f6.jsonl: "this should resolve it" [✓ verified]
+- Session 7c6b5a.jsonl: "TS2322: Type 'string' is not assignable to type 'number'" [✓ verified]
+`;
+
+const SAMPLE_LEDGER = {
+  "/users/you/code/myproject": {
+    "a1b2c3d4e5f6a1b2": { title: "Quote glob patterns in shell commands", status: "accepted", first_seen: "2026-08-12T10:03:00+00:00", last_seen: "2026-09-01T09:11:00+00:00" },
+    "b2c3d4e5f6a1b2c3": { title: "Check for gh CLI before using it", status: "seen", first_seen: "2026-09-01T09:11:00+00:00", last_seen: "2026-09-01T09:11:00+00:00" },
+    "c3d4e5f6a1b2c3d4": { title: "Silence npm audit noise", status: "rejected", first_seen: "2026-07-20T14:22:00+00:00", last_seen: "2026-08-12T10:03:00+00:00" }
+  }
+};
+
+const UNSAFE_PATTERNS = [
+  /ignore (all |any )?(previous|prior|above) instructions/i,
+  /disregard (the |your )?(system|previous) prompt/i,
+  /\byou are now\b/i,
+  /\bact as\b.{0,30}\b(root|admin|system)\b/i,
+  /curl\s+\S+\s*\|\s*(sh|bash)/i,
+  /\brm\s+-rf\b/i,
+  /\bexfiltrat\w*\b/i,
+  /\bsend\b.{0,40}\bto\s+https?:\/\//i,
+];
+
+function unsafeReasons(text) {
+  return UNSAFE_PATTERNS.filter((p) => p.test(text)).map((p) => p.source);
+}
+
+function esc(s) {
+  return (s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+}
+
+function parseReport(text) {
+  const header = {};
+  const projectM = text.match(/^Project:\s*`([^`]+)`/m);
+  const harnessesM = text.match(/^Harnesses:\s*(.+)$/m);
+  const sessionsHeadM = text.match(/^Sessions reviewed \((\d+) of (\d+) found/m);
+  header.project = projectM ? projectM[1] : null;
+  header.harnesses = harnessesM ? harnessesM[1].trim() : null;
+  header.reviewed = sessionsHeadM ? Number(sessionsHeadM[1]) : null;
+  header.found = sessionsHeadM ? Number(sessionsHeadM[2]) : null;
+  header.sessions = [...text.matchAll(/^- \[([\w-]+)\] (.+)$/gm)].map((m) => ({ harness: m[1], name: m[2] }));
+
+  const bodyStart = text.indexOf("\n---\n");
+  const body = bodyStart >= 0 ? text.slice(bodyStart + 5) : text;
+
+  const blocks = body.split(/(?=^## Suggestion:)/m).map((b) => b.trim()).filter((b) => b.startsWith("## Suggestion:"));
+  const suggestions = blocks.map((b) => {
+    const title = (b.match(/^## Suggestion:\s*(.+)$/m) || [, "Untitled"])[1].trim();
+    const addLine = (b.match(/\*\*Add to CLAUDE\.md:\*\*\s*(.+)$/m) || [, ""])[1].trim();
+    const webM = b.match(/\*\*Web source:\*\*\s*(.+)$/m);
+    const undersourced = /⚠️ WARNING: only (\d+) distinct session/.exec(b);
+    const evidence = [...b.matchAll(/^- Session ([^:]+):\s*"([^"]*)"\s*(\[[^\]]*\])?/gm)].map((m) => ({
+      file: m[1].trim(),
+      quote: m[2],
+      verified: /verified/i.test(m[3] || ""),
+    }));
+    let webUrl = null, webText = null;
+    if (webM) {
+      const urlM = webM[1].match(/(https?:\/\/\S+)/);
+      webUrl = urlM ? urlM[1] : null;
+      webText = webM[1].replace(/\s*—?\s*https?:\/\/\S+\s*$/, "").trim();
+    }
+    return { title, addLine, evidence, webUrl, webText, undersourcedCount: undersourced ? Number(undersourced[1]) : null };
+  });
+
+  return { header, suggestions, hasBody: /No repeated mistakes found/.test(body) ? "none" : (suggestions.length ? "some" : "unknown") };
+}
+
+function statTile(n, label, cls) {
+  return `<div class="stat ${cls || ""}"><div class="n">${n}</div><div class="l">${esc(label)}</div></div>`;
+}
+
+function renderMeta(header) {
+  if (!header.project) {
+    document.getElementById("meta-panel").hidden = true;
+    return;
+  }
+  document.getElementById("meta-panel").hidden = false;
+  const sessionsHtml = header.sessions.map((s) => `<li><span class="h">[${esc(s.harness)}]</span> ${esc(s.name)}</li>`).join("");
+  document.getElementById("meta-body").innerHTML = `
+    <div class="meta-row"><b>Project</b> &nbsp;<code>${esc(header.project)}</code></div>
+    <div class="meta-row"><b>Harnesses</b> &nbsp;${esc(header.harnesses || "—")}</div>
+    <div class="meta-row"><b>Sessions</b> &nbsp;${header.reviewed ?? "—"} of ${header.found ?? "—"} found, most recent first</div>
+    <ul class="session-list">${sessionsHtml}</ul>
+  `;
+}
+
+function renderStats(header, suggestions) {
+  const totalEvidence = suggestions.flatMap((s) => s.evidence);
+  const verified = totalEvidence.filter((e) => e.verified).length;
+  const failed = totalEvidence.length - verified;
+  const undersourced = suggestions.filter((s) => s.undersourcedCount != null).length;
+  const withSource = suggestions.filter((s) => s.webUrl).length;
+
+  document.getElementById("stats").innerHTML = [
+    statTile(header.reviewed ?? "—", "Sessions reviewed"),
+    statTile(suggestions.length, "Suggestions found", "accent"),
+    statTile(`${verified}/${totalEvidence.length || 0}`, "Quotes verified", "good"),
+    statTile(failed, "Quotes not found verbatim", failed ? "warn" : ""),
+    statTile(undersourced, "Under-sourced (<3 sessions)", undersourced ? "warn" : ""),
+    statTile(withSource, "Backed by a web source"),
+  ].join("");
+}
+
+function renderSuggestions(suggestions, noneReason) {
+  const el = document.getElementById("suggestions");
+  document.getElementById("suggestion-count").textContent = suggestions.length ? `(${suggestions.length})` : "";
+  if (!suggestions.length) {
+    el.innerHTML = `<div class="empty">${noneReason === "none" ? "No repeated mistakes found across 3+ sessions." : "No suggestions to show yet — load a report.md."}</div>`;
+    return;
+  }
+  el.innerHTML = suggestions.map((s) => {
+    const reasons = unsafeReasons(s.addLine);
+    const verifiedCount = s.evidence.filter((e) => e.verified).length;
+    const badge = verifiedCount === s.evidence.length && s.evidence.length
+      ? `<span class="badge good">${verifiedCount}/${s.evidence.length} verified</span>`
+      : `<span class="badge bad">${verifiedCount}/${s.evidence.length} verified</span>`;
+    const warnBanner = reasons.length
+      ? `<div class="warn-banner">⚠️ Flagged by the safety guardrail — matches a suspicious pattern before it would ever reach CLAUDE.md/AGENTS.md.</div>`
+      : "";
+    const underBanner = s.undersourcedCount != null
+      ? `<div class="undersourced-banner">⚠️ Only ${s.undersourcedCount} distinct session(s) cited — should be 3 or more. Treat with suspicion.</div>`
+      : "";
+    const evidenceHtml = s.evidence.map((e) => `
+      <div class="quote">
+        <span class="file">${esc(e.file)}</span>
+        <span class="txt">"${esc(e.quote)}"</span>
+        <span class="tag ${e.verified ? "ok" : "bad"}">${e.verified ? "✓ verified" : "⚠ not found"}</span>
+      </div>`).join("");
+    const webHtml = s.webUrl
+      ? `<div class="web-source">🔎 ${esc(s.webText)} — <a href="${esc(s.webUrl)}" target="_blank" rel="noopener">${esc(s.webUrl)}</a></div>`
+      : "";
+    return `
+      <div class="card ${reasons.length ? "unsafe" : ""}">
+        <div class="card-head">
+          <h3 class="card-title">${esc(s.title)}</h3>
+          ${badge}
+        </div>
+        ${warnBanner}
+        ${underBanner}
+        <div class="instruction">${esc(s.addLine)}</div>
+        <div class="evidence">
+          <div class="label">Evidence</div>
+          ${evidenceHtml}
+        </div>
+        ${webHtml}
+      </div>`;
+  }).join("");
+}
+
+function renderLedger(ledger) {
+  const body = document.getElementById("ledger-body");
+  if (!ledger) {
+    body.innerHTML = `<div class="empty">No ledger.json loaded yet — use "Load ledger.json" above.</div>`;
+    return;
+  }
+  const rows = [];
+  for (const [project, suggestions] of Object.entries(ledger)) {
+    for (const [key, s] of Object.entries(suggestions)) {
+      rows.push({ project, key, ...s });
+    }
+  }
+  if (!rows.length) {
+    document.getElementById("ledger-body").innerHTML = `<div class="empty">Ledger loaded, but it's empty.</div>`;
+    return;
+  }
+  document.getElementById("ledger-body").innerHTML = `
+    <table class="ledger">
+      <thead><tr><th>Project</th><th>Suggestion</th><th>Status</th><th>First seen</th><th>Last seen</th></tr></thead>
+      <tbody>
+        ${rows.map((r) => `
+          <tr>
+            <td><code>${esc(r.project)}</code></td>
+            <td>${esc(r.title || r.key)}</td>
+            <td><span class="status-chip ${esc(r.status || "seen")}">${esc(r.status || "seen")}</span></td>
+            <td>${esc((r.first_seen || "").slice(0, 10))}</td>
+            <td>${esc((r.last_seen || "").slice(0, 10))}</td>
+          </tr>`).join("")}
+      </tbody>
+    </table>
+  `;
+}
+
+const PALETTE = { good: "#8aa87e", bad: "#c06556", accent: "#d98a52", neutral: "#4a4234" };
+
+function donut(elId, parts) {
+  // parts: [{value, color, label}] — native CSS conic-gradient, no chart library.
+  const total = parts.reduce((a, p) => a + p.value, 0);
+  const el = document.getElementById(elId);
+  if (!total) {
+    el.style.background = PALETTE.neutral;
+    el.querySelector(".hole").textContent = "—";
+    return;
+  }
+  let acc = 0;
+  const stops = parts.filter((p) => p.value > 0).map((p) => {
+    const start = (acc / total) * 360;
+    acc += p.value;
+    return `${p.color} ${start}deg ${(acc / total) * 360}deg`;
+  });
+  el.style.background = `conic-gradient(${stops.join(", ")})`;
+  const pct = Math.round((parts[0].value / total) * 100);
+  el.querySelector(".hole").textContent = `${pct}%`;
+}
+
+function legend(elId, parts) {
+  document.getElementById(elId).innerHTML = parts.map((p) =>
+    `<div class="legend-row"><span class="legend-dot" style="background:${p.color}"></span>${esc(p.label)}: <b>${p.value}</b></div>`
+  ).join("");
+}
+
+function hbars(elId, rows, colorClass) {
+  // rows: [{label, value}] or [{label, good, bad}] for stacked bars
+  const max = Math.max(1, ...rows.map((r) => (r.value ?? (r.good + r.bad))));
+  document.getElementById(elId).innerHTML = rows.map((r) => {
+    const total = r.value ?? (r.good + r.bad);
+    const track = r.value != null
+      ? `<div class="hbar-fill ${colorClass}" style="width:${(r.value / max) * 100}%"></div>`
+      : `<div class="hbar-fill good" style="width:${(r.good / max) * 100}%"></div><div class="hbar-fill bad" style="width:${(r.bad / max) * 100}%"></div>`;
+    return `
+      <div class="hbar-row">
+        <div class="hbar-label" title="${esc(r.label)}">${esc(r.label)}</div>
+        <div class="hbar-track">${track}</div>
+        <div class="hbar-count">${total}</div>
+      </div>`;
+  }).join("") || `<div class="empty">Nothing to show yet.</div>`;
+}
+
+function renderAnalytics(header, suggestions, ledger) {
+  const totalEvidence = suggestions.flatMap((s) => s.evidence);
+  const verified = totalEvidence.filter((e) => e.verified).length;
+  const failed = totalEvidence.length - verified;
+  donut("donut-quotes", [{ value: verified, color: PALETTE.good, label: "Verified" }, { value: failed, color: PALETTE.bad, label: "Not found" }]);
+  legend("legend-quotes", [{ value: verified, color: PALETTE.good, label: "Verified" }, { value: failed, color: PALETTE.bad, label: "Not found verbatim" }]);
+
+  if (ledger) {
+    const counts = { accepted: 0, rejected: 0, seen: 0 };
+    for (const suggestionsForProject of Object.values(ledger)) {
+      for (const s of Object.values(suggestionsForProject)) {
+        counts[s.status || "seen"] = (counts[s.status || "seen"] || 0) + 1;
+      }
+    }
+    donut("donut-ledger", [
+      { value: counts.accepted, color: PALETTE.good, label: "Accepted" },
+      { value: counts.rejected, color: PALETTE.bad, label: "Rejected" },
+      { value: counts.seen, color: PALETTE.neutral, label: "Seen" },
+    ]);
+    legend("legend-ledger", [
+      { value: counts.accepted, color: PALETTE.good, label: "Accepted" },
+      { value: counts.rejected, color: PALETTE.bad, label: "Rejected" },
+      { value: counts.seen, color: PALETTE.neutral, label: "Seen, undecided" },
+    ]);
+  } else {
+    document.getElementById("donut-ledger").style.background = PALETTE.neutral;
+    document.getElementById("donut-ledger").querySelector(".hole").textContent = "—";
+    legend("legend-ledger", [{ value: 0, color: PALETTE.neutral, label: "Load ledger.json to see this" }]);
+  }
+
+  hbars("bars-suggestions", suggestions.map((s) => ({
+    label: s.title,
+    good: s.evidence.filter((e) => e.verified).length,
+    bad: s.evidence.filter((e) => !e.verified).length,
+  })));
+
+  const byHarness = {};
+  for (const s of header.sessions || []) byHarness[s.harness] = (byHarness[s.harness] || 0) + 1;
+  hbars("bars-harness", Object.entries(byHarness).map(([label, value]) => ({ label, value })), "accent");
+}
+
+let currentLedger = null;
+let currentHeader = { sessions: [] };
+let currentSuggestions = [];
+
+function renderAll(reportText, ledger) {
+  const { header, suggestions, hasBody } = parseReport(reportText);
+  currentHeader = header;
+  currentSuggestions = suggestions;
+  renderMeta(header);
+  renderStats(header, suggestions);
+  renderSuggestions(suggestions, hasBody);
+  renderLedger(ledger);
+  renderAnalytics(header, suggestions, ledger);
+}
+
+function loadSample() {
+  document.getElementById("subtitle").textContent = "Showing sample data — load your own report to replace it";
+  currentLedger = SAMPLE_LEDGER;
+  renderAll(SAMPLE_REPORT, SAMPLE_LEDGER);
+}
+
+document.getElementById("report-input").addEventListener("change", (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    document.getElementById("subtitle").textContent = `Loaded ${file.name}`;
+    renderAll(reader.result, currentLedger);
+  };
+  reader.readAsText(file);
+});
+
+document.getElementById("ledger-input").addEventListener("change", (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  const reader = new FileReader();
+  reader.onload = () => {
+    try {
+      currentLedger = JSON.parse(reader.result);
+      renderLedger(currentLedger);
+      renderAnalytics(currentHeader, currentSuggestions, currentLedger);
+    } catch {
+      alert("That doesn't look like valid JSON (expected ledger.json).");
+    }
+  };
+  reader.readAsText(file);
+});
+
+document.getElementById("reset-btn").addEventListener("click", loadSample);
+
+document.querySelectorAll(".nav-item").forEach((btn) => {
+  btn.addEventListener("click", () => {
+    document.querySelectorAll(".nav-item").forEach((b) => b.classList.toggle("active", b === btn));
+    document.querySelectorAll(".tab-panel").forEach((p) => { p.hidden = p.dataset.tab !== btn.dataset.tab; });
+  });
+});
+
+loadSample();
+</script>
+</body>
+</html>

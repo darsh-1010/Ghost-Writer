@@ -1,0 +1,577 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Session Reviewer</title>
+<style>
+  :root {
+    color-scheme: dark;
+    --bg: #15130f;
+    --bg-elevated: #1c1913;
+    --bg-card: #201c16;
+    --bg-card-hover: #24201a;
+    --bg-input: #171410;
+    --border: #332c22;
+    --border-soft: #2a251d;
+    --text: #f2ece1;
+    --text-dim: #ab9f8c;
+    --text-faint: #766c5b;
+    --accent: #d98a52;
+    --accent-strong: #eba46f;
+    --accent-soft: rgba(217, 138, 82, 0.14);
+    --success: #8aa87e;
+    --success-soft: rgba(138, 168, 126, 0.13);
+    --warn: #c9a227;
+    --warn-soft: rgba(201, 162, 39, 0.13);
+    --danger: #c06556;
+    --danger-soft: rgba(192, 101, 86, 0.14);
+    --mono: ui-monospace, "SF Mono", "Cascadia Code", Menlo, Consolas, monospace;
+    --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, sans-serif;
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text); font-family: var(--sans); line-height: 1.5; }
+  .wrap { max-width: 880px; margin: 0 auto; padding: 28px 24px 80px; }
+  [hidden] { display: none !important; }
+
+  header.top {
+    display: flex; align-items: center; justify-content: space-between; gap: 16px;
+    padding-bottom: 20px; margin-bottom: 26px; border-bottom: 1px solid var(--border-soft);
+  }
+  .brand { display: flex; align-items: center; gap: 12px; }
+  .brand .mark {
+    width: 34px; height: 34px; border-radius: 9px;
+    background: linear-gradient(155deg, var(--accent), #a85f2e);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 16px; font-weight: 700; color: #1a1208; flex: none;
+  }
+  .brand h1 { font-size: 16px; margin: 0; }
+  .brand p { margin: 2px 0 0; font-size: 12.5px; color: var(--text-faint); }
+  .top-meta { font-size: 12px; color: var(--text-faint); text-align: right; }
+  .top-meta b { color: var(--text-dim); }
+  .link-btn { background: none; border: none; color: var(--accent-strong); font: inherit; font-size: 12.5px; cursor: pointer; padding: 0; }
+  .link-btn:hover { text-decoration: underline; }
+
+  .card {
+    background: var(--bg-elevated); border: 1px solid var(--border-soft);
+    border-radius: 12px; padding: 22px; margin-bottom: 16px;
+  }
+  .card h2 { font-size: 15px; margin: 0 0 4px; }
+  .card .sub { font-size: 12.5px; color: var(--text-faint); margin: 0 0 18px; }
+
+  .field { margin-bottom: 14px; }
+  .field label { display: block; font-size: 12px; font-weight: 600; color: var(--text-dim); margin-bottom: 6px; }
+  .field .hint { font-size: 11px; color: var(--text-faint); margin-top: 5px; }
+  input[type=text], input[type=password], input[type=number], select, textarea {
+    width: 100%; font: inherit; font-size: 13px; color: var(--text);
+    background: var(--bg-input); border: 1px solid var(--border); border-radius: 8px;
+    padding: 9px 11px; outline: none; transition: border-color .12s;
+  }
+  input:focus, select:focus, textarea:focus { border-color: var(--accent); }
+  textarea { resize: vertical; min-height: 60px; font-family: var(--sans); }
+  .row { display: flex; gap: 12px; }
+  .row > .field { flex: 1; }
+  label.checkbox { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--text-dim); cursor: pointer; }
+  label.checkbox input { width: auto; }
+
+  .provider-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 18px; }
+  .provider-opt {
+    border: 1px solid var(--border); background: var(--bg-card); border-radius: 9px;
+    padding: 11px 8px; text-align: center; cursor: pointer; font-size: 12px; font-weight: 600; color: var(--text-dim);
+  }
+  .provider-opt:hover { background: var(--bg-card-hover); }
+  .provider-opt.active { border-color: var(--accent); background: var(--accent-soft); color: var(--accent-strong); }
+
+  .btn {
+    font: inherit; font-size: 13px; font-weight: 650; color: var(--text); background: var(--bg-card);
+    border: 1px solid var(--border); border-radius: 8px; padding: 10px 18px; cursor: pointer;
+  }
+  .btn:hover { background: var(--bg-card-hover); }
+  .btn:disabled { opacity: .4; cursor: not-allowed; }
+  .btn.primary { background: var(--accent); border-color: var(--accent); color: #201205; }
+  .btn.primary:hover { background: var(--accent-strong); }
+  .btn.small { font-size: 11.5px; padding: 6px 11px; font-weight: 600; }
+  .btn.good { color: var(--success); border-color: rgba(138,168,126,.4); }
+  .btn.good.active { background: var(--success-soft); }
+  .btn.bad { color: var(--danger); border-color: rgba(192,101,86,.4); }
+  .btn.bad.active { background: var(--danger-soft); }
+
+  .security-note {
+    display: flex; gap: 8px; font-size: 11.5px; color: var(--text-faint);
+    background: var(--bg-card); border: 1px solid var(--border-soft); border-radius: 8px; padding: 9px 11px; margin-top: 4px;
+  }
+
+  .project-row {
+    display: flex; align-items: center; gap: 12px; padding: 12px 14px;
+    border: 1px solid var(--border-soft); border-radius: 9px; margin-bottom: 8px; cursor: pointer; background: var(--bg-card);
+  }
+  .project-row:hover { background: var(--bg-card-hover); }
+  .project-row.active { border-color: var(--accent); background: var(--accent-soft); }
+  .project-row input { width: auto; flex: none; }
+  .project-row .info { flex: 1; min-width: 0; }
+  .project-row .path { font-family: var(--mono); font-size: 12.5px; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .project-row .meta { font-size: 11px; color: var(--text-faint); margin-top: 2px; }
+  .harness-chip {
+    display: inline-block; font-size: 10px; font-weight: 700; padding: 1px 7px; border-radius: 20px;
+    background: var(--bg-elevated); color: var(--accent-strong); margin-right: 4px;
+  }
+
+  .progress-line { display: flex; align-items: center; gap: 10px; font-size: 13px; color: var(--text-dim); }
+  .spinner {
+    width: 15px; height: 15px; border-radius: 50%; flex: none;
+    border: 2px solid var(--border); border-top-color: var(--accent); animation: spin 0.8s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+
+  .suggestion-card {
+    background: var(--bg-card); border: 1px solid var(--border-soft); border-left: 3px solid var(--accent);
+    border-radius: 10px; padding: 16px 18px; margin-bottom: 14px;
+  }
+  .suggestion-card.unsafe { border-left-color: var(--danger); }
+  .suggestion-card.decided-accepted { border-left-color: var(--success); }
+  .suggestion-card.decided-rejected { opacity: .55; }
+  .suggestion-card.applied { border-left-color: var(--success); background: var(--success-soft); }
+  .sc-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; margin-bottom: 8px; }
+  .sc-title { font-size: 14.5px; font-weight: 650; margin: 0; }
+  .badge { font-size: 10.5px; font-weight: 700; padding: 2px 8px; border-radius: 20px; white-space: nowrap; flex: none; }
+  .badge.seen { background: var(--bg-elevated); color: var(--text-faint); }
+  .warn-banner {
+    background: var(--danger-soft); border: 1px solid rgba(192,101,86,.35); color: #e3a99d;
+    border-radius: 8px; padding: 9px 12px; font-size: 12.5px; margin-bottom: 10px;
+  }
+  .undersourced-banner {
+    background: var(--warn-soft); border: 1px solid rgba(201,162,39,.35); color: #e0c465;
+    border-radius: 8px; padding: 9px 12px; font-size: 12.5px; margin-bottom: 10px;
+  }
+  .instruction { font-family: var(--mono); font-size: 12.5px; background: var(--bg-elevated); border: 1px solid var(--border-soft); border-radius: 7px; padding: 9px 12px; margin-bottom: 10px; }
+  .evidence .label { font-size: 11px; text-transform: uppercase; letter-spacing: .5px; color: var(--text-faint); margin-bottom: 6px; }
+  .quote { display: flex; gap: 8px; align-items: baseline; font-size: 12.5px; padding: 4px 0; border-bottom: 1px dashed var(--border-soft); }
+  .quote:last-child { border-bottom: none; }
+  .quote .file { font-family: var(--mono); color: var(--text-faint); flex: none; }
+  .quote .txt { color: var(--text-dim); font-style: italic; }
+  .quote .tag { flex: none; font-size: 10.5px; font-weight: 700; }
+  .quote .tag.ok { color: var(--success); }
+  .quote .tag.bad { color: var(--danger); }
+  .web-source { margin-top: 10px; font-size: 12.5px; color: var(--text-dim); }
+  .web-source a { color: var(--accent-strong); text-decoration: none; }
+  .sc-actions { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
+  .comment-box { margin-top: 10px; display: flex; gap: 8px; align-items: flex-start; }
+  .comment-box textarea { flex: 1; }
+  .applied-tag { font-size: 11px; font-weight: 700; color: var(--success); }
+
+  .apply-bar {
+    position: sticky; bottom: 16px; margin-top: 20px;
+    background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 12px;
+    padding: 14px 18px; display: flex; align-items: center; justify-content: space-between; gap: 14px;
+    box-shadow: 0 8px 30px rgba(0,0,0,.4);
+  }
+  .apply-bar .counts { font-size: 12.5px; color: var(--text-dim); }
+  .apply-bar .counts b { color: var(--text); }
+
+  .toast {
+    background: var(--success-soft); border: 1px solid rgba(138,168,126,.4); color: var(--success);
+    border-radius: 10px; padding: 12px 16px; margin-bottom: 16px; font-size: 13px;
+  }
+  .toast pre { white-space: pre-wrap; font-family: var(--mono); font-size: 11.5px; color: var(--text-dim); margin: 8px 0 0; }
+  .empty { text-align: center; padding: 30px; color: var(--text-faint); font-size: 13px; }
+  .error-banner { background: var(--danger-soft); border: 1px solid rgba(192,101,86,.4); color: #e3a99d; border-radius: 10px; padding: 12px 16px; margin-bottom: 16px; font-size: 13px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header class="top">
+    <div class="brand">
+      <div class="mark">SR</div>
+      <div>
+        <h1>Session Reviewer</h1>
+        <p>Find your repeated coding mistakes, review the fix, decide what sticks.</p>
+      </div>
+    </div>
+    <div class="top-meta" id="top-meta"></div>
+  </header>
+
+  <!-- SETUP -->
+  <section class="card" id="screen-setup">
+    <h2>1. Choose a model provider</h2>
+    <p class="sub">Anthropic is the default. Your key stays in this app's memory for this run only, unless you check "remember".</p>
+
+    <div class="provider-grid" id="provider-grid">
+      <div class="provider-opt active" data-provider="anthropic">Anthropic<br>(Claude)</div>
+      <div class="provider-opt" data-provider="openai">OpenAI<br>(ChatGPT)</div>
+      <div class="provider-opt" data-provider="gemini">Google<br>(Gemini)</div>
+      <div class="provider-opt" data-provider="ollama">Ollama<br>(local/open-source)</div>
+    </div>
+
+    <div class="field" id="field-key">
+      <label for="api-key">API key</label>
+      <input type="password" id="api-key" placeholder="sk-ant-...">
+      <div class="hint" id="key-hint"></div>
+    </div>
+    <div class="field" id="field-host" hidden>
+      <label for="ollama-host">Ollama host</label>
+      <input type="text" id="ollama-host" value="http://localhost:11434">
+      <div class="hint">Make sure <code>ollama serve</code> is running locally. No key needed.</div>
+    </div>
+
+    <div class="row">
+      <div class="field">
+        <label for="model">Synthesis model <span style="color:var(--text-faint);font-weight:400;">(clusters + writes suggestions)</span></label>
+        <input type="text" id="model">
+      </div>
+      <div class="field">
+        <label for="fast-model">Extraction model <span style="color:var(--text-faint);font-weight:400;">(reads each transcript, cheaper)</span></label>
+        <input type="text" id="fast-model">
+      </div>
+    </div>
+
+    <label class="checkbox" id="remember-row">
+      <input type="checkbox" id="remember"> Remember this key on this device (writes to .env next to the script)
+    </label>
+    <div class="security-note">🔒 This app only listens on your own machine (127.0.0.1) — the key never leaves it except to call the provider you picked.</div>
+
+    <div id="setup-error" class="error-banner" hidden></div>
+    <div style="margin-top:18px;">
+      <button class="btn primary" id="continue-btn">Continue →</button>
+    </div>
+  </section>
+
+  <!-- PROJECT PICKER -->
+  <section class="card" id="screen-projects" hidden>
+    <h2>2. Pick a repo to review</h2>
+    <p class="sub">Scanned the known session-store locations for Claude Code, Codex, and Antigravity CLI on this machine — not your whole disk.</p>
+    <div id="projects-list"></div>
+    <div class="row" style="align-items:flex-end;">
+      <div class="field" style="flex:none;width:140px;">
+        <label for="sessions-n">Sessions to review</label>
+        <input type="number" id="sessions-n" value="10" min="1" max="50">
+      </div>
+      <div class="field" style="flex:none;">
+        <button class="btn primary" id="scan-btn" disabled>Scan this repo →</button>
+      </div>
+      <div class="field">
+        <button class="btn small" id="back-to-setup">← change provider</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- SCANNING -->
+  <section class="card" id="screen-scanning" hidden>
+    <h2>Reviewing your sessions…</h2>
+    <div class="progress-line"><span class="spinner"></span><span id="scan-status">queued</span></div>
+    <div id="scan-error" class="error-banner" hidden></div>
+  </section>
+
+  <!-- REVIEW -->
+  <section id="screen-review" hidden>
+    <div class="card">
+      <h2>3. Review suggestions</h2>
+      <p class="sub" id="review-sub"></p>
+    </div>
+    <div id="toast-area"></div>
+    <div id="suggestions"></div>
+    <div class="apply-bar" id="apply-bar" hidden>
+      <div class="counts" id="apply-counts"></div>
+      <div style="display:flex;gap:8px;">
+        <button class="btn small" id="scan-another">Scan another repo</button>
+        <button class="btn primary" id="apply-btn">Apply approved →</button>
+      </div>
+    </div>
+  </section>
+</div>
+
+<script>
+const PROVIDER_DEFAULTS = {
+  anthropic: { model: "claude-sonnet-5", fast_model: "claude-haiku-4-5-20251001", keyPlaceholder: "sk-ant-...", hint: "console.anthropic.com" },
+  openai: { model: "gpt-4o", fast_model: "gpt-4o-mini", keyPlaceholder: "sk-...", hint: "platform.openai.com — no web-search-backed suggestions with this provider (see README)" },
+  gemini: { model: "gemini-2.0-flash", fast_model: "gemini-2.0-flash", keyPlaceholder: "AIza...", hint: "aistudio.google.com — no web-search-backed suggestions with this provider (see README)" },
+  ollama: { model: "llama3.1", fast_model: "llama3.1" },
+};
+
+let state = { provider: "anthropic", jobId: null, projectPath: null, pollTimer: null };
+
+function $(id) { return document.getElementById(id); }
+function esc(s) { return (s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
+function show(id) { $(id).hidden = false; }
+function hide(id) { $(id).hidden = true; }
+
+async function api(method, path, body) {
+  const res = await fetch(path, {
+    method,
+    headers: body ? { "Content-Type": "application/json" } : undefined,
+    body: body ? JSON.stringify(body) : undefined,
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw new Error(data.error || `HTTP ${res.status}`);
+  return data;
+}
+
+// --- setup screen ---
+document.querySelectorAll(".provider-opt").forEach((el) => {
+  el.addEventListener("click", () => {
+    document.querySelectorAll(".provider-opt").forEach((o) => o.classList.remove("active"));
+    el.classList.add("active");
+    state.provider = el.dataset.provider;
+    applyProviderDefaults();
+  });
+});
+
+function applyProviderDefaults() {
+  const d = PROVIDER_DEFAULTS[state.provider];
+  $("model").value = d.model;
+  $("fast-model").value = d.fast_model;
+  if (state.provider === "ollama") {
+    hide("field-key"); show("field-host"); hide("remember-row");
+  } else {
+    show("field-key"); hide("field-host"); show("remember-row");
+    $("api-key").placeholder = d.keyPlaceholder;
+    $("key-hint").textContent = `Get a key at ${d.hint}`;
+  }
+}
+applyProviderDefaults();
+
+$("continue-btn").addEventListener("click", async () => {
+  hide("setup-error");
+  const body = {
+    provider: state.provider,
+    model: $("model").value.trim(),
+    fast_model: $("fast-model").value.trim(),
+  };
+  if (state.provider === "ollama") {
+    body.ollama_host = $("ollama-host").value.trim();
+  } else {
+    body.api_key = $("api-key").value;
+    body.remember = $("remember").checked;
+  }
+  try {
+    await api("POST", "/api/session", body);
+    updateTopMeta();
+    await loadProjects();
+  } catch (e) {
+    $("setup-error").textContent = e.message;
+    show("setup-error");
+  }
+});
+
+function updateTopMeta() {
+  $("top-meta").innerHTML = `Provider: <b>${esc(state.provider)}</b>`;
+}
+
+// --- project picker ---
+async function loadProjects() {
+  hide("screen-setup");
+  show("screen-projects");
+  const { projects } = await api("GET", "/api/projects");
+  const list = $("projects-list");
+  if (!projects.length) {
+    list.innerHTML = `<div class="empty">No session history found yet for Claude Code, Codex, or Antigravity CLI on this machine.</div>`;
+    return;
+  }
+  list.innerHTML = projects.map((p, i) => `
+    <label class="project-row" data-path="${esc(p.path)}">
+      <input type="radio" name="project" value="${i}">
+      <div class="info">
+        <div class="path">${esc(p.path)}</div>
+        <div class="meta">${p.harnesses.map((h) => `<span class="harness-chip">${esc(h)}</span>`).join("")}${p.sessions} session(s)</div>
+      </div>
+    </label>`).join("");
+  list.querySelectorAll(".project-row").forEach((row) => {
+    row.addEventListener("click", () => {
+      list.querySelectorAll(".project-row").forEach((r) => r.classList.remove("active"));
+      row.classList.add("active");
+      row.querySelector("input").checked = true;
+      state.projectPath = row.dataset.path;
+      $("scan-btn").disabled = false;
+    });
+  });
+}
+
+$("back-to-setup").addEventListener("click", () => { hide("screen-projects"); show("screen-setup"); });
+
+$("scan-btn").addEventListener("click", async () => {
+  hide("screen-projects");
+  show("screen-scanning");
+  $("scan-status").textContent = "queued";
+  hide("scan-error");
+  try {
+    const { job_id } = await api("POST", "/api/scan", {
+      project_path: state.projectPath,
+      sessions: Number($("sessions-n").value) || 10,
+    });
+    state.jobId = job_id;
+    pollJob();
+  } catch (e) {
+    $("scan-error").textContent = e.message;
+    show("scan-error");
+  }
+});
+
+function pollJob() {
+  clearTimeout(state.pollTimer);
+  state.pollTimer = setTimeout(async () => {
+    try {
+      const job = await api("GET", `/api/scan/${state.jobId}`);
+      $("scan-status").textContent = {
+        queued: "queued…", scanning: "scanning your sessions…",
+        extracting: "extracting candidate mistakes…", synthesizing: "clustering + writing suggestions…",
+      }[job.status] || job.status;
+      if (job.status === "done") return renderReview(job);
+      if (job.status === "error") {
+        $("scan-error").textContent = job.error;
+        show("scan-error");
+        return;
+      }
+      pollJob();
+    } catch (e) {
+      $("scan-error").textContent = e.message;
+      show("scan-error");
+    }
+  }, 1200);
+}
+
+// --- review screen ---
+function evidenceFromBlock(block) {
+  return [...block.matchAll(/^- Session ([^:]+):\s*"([^"]*)"\s*(\[[^\]]*\])?/gm)].map((m) => ({
+    file: m[1].trim(), quote: m[2], verified: /verified/i.test(m[3] || ""),
+  }));
+}
+function webSourceFromBlock(block) {
+  const m = block.match(/\*\*Web source:\*\*\s*(.+)$/m);
+  if (!m) return null;
+  const urlM = m[1].match(/(https?:\/\/\S+)/);
+  return { url: urlM ? urlM[1] : null, text: m[1].replace(/\s*—?\s*https?:\/\/\S+\s*$/, "").trim() };
+}
+function undersourcedFromBlock(block) {
+  const m = /⚠️ WARNING: only (\d+) distinct session/.exec(block);
+  return m ? Number(m[1]) : null;
+}
+
+function renderReview(job) {
+  hide("screen-scanning");
+  show("screen-review");
+  $("review-sub").textContent = `${job.header.project} — ${job.header.sessions_reviewed} of ${job.header.sessions_found} sessions reviewed`;
+  state.job = job;
+  renderSuggestions();
+}
+
+function renderSuggestions() {
+  const job = state.job;
+  const el = $("suggestions");
+  if (!job.suggestions.length) {
+    el.innerHTML = `<div class="card"><div class="empty">No repeated mistakes found across 3+ sessions. Nothing to review.</div></div>`;
+    hide("apply-bar");
+    return;
+  }
+  el.innerHTML = job.suggestions.map((s) => {
+    const evidence = evidenceFromBlock(s.block);
+    const web = webSourceFromBlock(s.block);
+    const under = undersourcedFromBlock(s.block);
+    const isUnsafe = s.unsafe_reasons && s.unsafe_reasons.length;
+    const cls = s.status === "applied" ? "applied" : s.status === "accepted" ? "decided-accepted" : s.status === "rejected" ? "decided-rejected" : "";
+    return `
+      <div class="suggestion-card ${isUnsafe ? "unsafe" : ""} ${cls}" data-id="${s.id}">
+        <div class="sc-head">
+          <h3 class="sc-title">${esc(s.title)}</h3>
+          ${s.already_seen ? '<span class="badge seen">already seen before</span>' : ""}
+        </div>
+        ${isUnsafe ? `<div class="warn-banner">⚠️ Flagged by the safety guardrail (${esc(s.unsafe_reasons.join(", "))}) — this is what would be written to CLAUDE.md/AGENTS.md, so double-check it's a genuine coding note.</div>` : ""}
+        ${under != null ? `<div class="undersourced-banner">⚠️ Only ${under} distinct session(s) cited — should be 3 or more.</div>` : ""}
+        <div class="instruction">${esc(s.add_line)}</div>
+        <div class="evidence">
+          <div class="label">Why this was suggested</div>
+          ${evidence.map((e) => `<div class="quote"><span class="file">${esc(e.file)}</span><span class="txt">"${esc(e.quote)}"</span><span class="tag ${e.verified ? "ok" : "bad"}">${e.verified ? "✓ verified" : "⚠ not found"}</span></div>`).join("")}
+        </div>
+        ${web && web.url ? `<div class="web-source">🔎 ${esc(web.text)} — <a href="${esc(web.url)}" target="_blank" rel="noopener">${esc(web.url)}</a></div>` : ""}
+        ${s.status === "applied"
+          ? `<div class="applied-tag" style="margin-top:10px;">✓ Written to CLAUDE.md/AGENTS.md</div>`
+          : `<div class="sc-actions">
+              <button class="btn small good ${s.status === "accepted" ? "active" : ""}" data-action="approve">Approve</button>
+              <button class="btn small bad ${s.status === "rejected" ? "active" : ""}" data-action="reject">Reject</button>
+              <button class="btn small" data-action="comment">Comment & revise</button>
+            </div>
+            <div class="comment-box" hidden data-role="comment-box">
+              <textarea placeholder="e.g. this isn't really a mistake, or: make the instruction more specific about..."></textarea>
+              <button class="btn small primary" data-action="submit-comment">Revise</button>
+            </div>`}
+      </div>`;
+  }).join("");
+
+  el.querySelectorAll(".suggestion-card").forEach((card) => {
+    const id = Number(card.dataset.id);
+    card.querySelector('[data-action="approve"]')?.addEventListener("click", () => decide(id, "accepted"));
+    card.querySelector('[data-action="reject"]')?.addEventListener("click", () => decide(id, "rejected"));
+    card.querySelector('[data-action="comment"]')?.addEventListener("click", () => {
+      card.querySelector('[data-role="comment-box"]').hidden = false;
+    });
+    card.querySelector('[data-action="submit-comment"]')?.addEventListener("click", async (ev) => {
+      const box = card.querySelector('[data-role="comment-box"]');
+      const comment = box.querySelector("textarea").value.trim();
+      if (!comment) return;
+      ev.target.disabled = true;
+      ev.target.textContent = "Revising…";
+      try {
+        const { suggestion } = await api("POST", "/api/suggestion/revise", { job_id: state.jobId, id, comment });
+        const idx = state.job.suggestions.findIndex((s) => s.id === id);
+        state.job.suggestions[idx] = suggestion;
+        renderSuggestions();
+      } catch (e) {
+        alert("Revision failed: " + e.message);
+        ev.target.disabled = false;
+        ev.target.textContent = "Revise";
+      }
+    });
+  });
+  updateApplyBar();
+}
+
+async function decide(id, status) {
+  const idx = state.job.suggestions.findIndex((s) => s.id === id);
+  const current = state.job.suggestions[idx].status;
+  const next = current === status ? "pending" : status; // click again to undo
+  const { suggestion } = await api("POST", "/api/suggestion/decide", { job_id: state.jobId, id, status: next });
+  state.job.suggestions[idx] = suggestion;
+  renderSuggestions();
+}
+
+function updateApplyBar() {
+  const counts = { accepted: 0, rejected: 0, pending: 0, applied: 0 };
+  for (const s of state.job.suggestions) counts[s.status] = (counts[s.status] || 0) + 1;
+  if (counts.accepted + counts.rejected + counts.pending + counts.applied === 0) return hide("apply-bar");
+  show("apply-bar");
+  $("apply-counts").innerHTML = `<b>${counts.accepted}</b> approved · <b>${counts.rejected}</b> rejected · <b>${counts.pending}</b> pending${counts.applied ? ` · <b>${counts.applied}</b> applied` : ""}`;
+  $("apply-btn").disabled = counts.accepted === 0;
+}
+
+$("apply-btn").addEventListener("click", async () => {
+  const n = state.job.suggestions.filter((s) => s.status === "accepted").length;
+  if (!confirm(`Write ${n} approved suggestion(s) to CLAUDE.md/AGENTS.md in ${state.job.header.project}?`)) return;
+  try {
+    const result = await api("POST", "/api/apply", { job_id: state.jobId });
+    $("toast-area").innerHTML = `<div class="toast">✓ Written to <code>${esc(result.written_to)}</code><pre>${esc(result.block)}</pre></div>`;
+    const jobRefresh = await api("GET", `/api/scan/${state.jobId}`);
+    state.job = jobRefresh;
+    renderSuggestions();
+  } catch (e) {
+    alert("Apply failed: " + e.message);
+  }
+});
+
+$("scan-another").addEventListener("click", () => {
+  hide("screen-review");
+  $("toast-area").innerHTML = "";
+  loadProjects();
+});
+
+// resume mid-session on refresh, since the server keeps state across reloads
+(async function init() {
+  try {
+    const st = await api("GET", "/api/state");
+    if (st.configured) {
+      state.provider = st.provider;
+      updateTopMeta();
+      await loadProjects();
+    }
+  } catch (e) { /* server not reachable yet on first paint — stay on setup */ }
+})();
+</script>
+</body>
+</html>
