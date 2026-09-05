@@ -52,6 +52,34 @@ Requires `ANTHROPIC_API_KEY` (env var, or in `.env` next to the script —
 already gitignored) unless `--provider`/the app's provider dropdown selects
 OpenAI/Gemini/Ollama instead. See [README.md](README.md) for all CLI flags.
 
+## Git workflow
+
+`main` is the stable branch. `dev` sits one level below it and is only ever
+updated by merging a finished work branch in — never commit to `dev`
+directly. Every unit of work gets its own branch cut from `dev`:
+
+```bash
+git checkout dev
+git pull origin dev                        # make sure dev is current
+git checkout -b <work-branch-name> dev     # e.g. fix/ledger-race, feat/gemini-tools
+
+# ... do the work, commit as usual ...
+
+git checkout main
+git pull origin main
+git merge --ff-only <work-branch-name>     # or a squash/PR merge, project preference
+git push origin main
+
+git checkout dev
+git merge --ff-only main                   # keep dev caught up with what just shipped
+git push origin dev
+```
+
+If `--ff-only` refuses because `main` moved since the work branch was cut,
+rebase the work branch onto `main` first (`git rebase main`) rather than
+merging `main` into the work branch — keeps history linear. Delete the work
+branch once it's merged; `dev` and `main` are the only long-lived branches.
+
 ## Conventions
 
 - Stdlib only beyond `anthropic` (see `requirements.txt`) — don't add a
