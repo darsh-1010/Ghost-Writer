@@ -3,23 +3,23 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Session Reviewer</title>
+<title>Ghost Writer</title>
 <style>
   :root {
     color-scheme: dark;
-    --bg: #15130f;
+    --bg: #100e0b;
     --bg-elevated: #1c1913;
     --bg-card: #201c16;
     --bg-card-hover: #24201a;
     --bg-input: #171410;
-    --border: #332c22;
+    --border: #372f24;
     --border-soft: #2a251d;
     --text: #f2ece1;
     --text-dim: #ab9f8c;
     --text-faint: #766c5b;
     --accent: #d98a52;
     --accent-strong: #eba46f;
-    --accent-soft: rgba(217, 138, 82, 0.14);
+    --accent-soft: rgba(217, 138, 82, 0.16);
     --success: #8aa87e;
     --success-soft: rgba(138, 168, 126, 0.13);
     --warn: #c9a227;
@@ -28,44 +28,89 @@
     --danger-soft: rgba(192, 101, 86, 0.14);
     --mono: ui-monospace, "SF Mono", "Cascadia Code", Menlo, Consolas, monospace;
     --sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Inter, sans-serif;
+    /* glass tokens — one definition, reused everywhere (per glassmorphism-2026
+       guidance: don't improvise blur/opacity per card) */
+    --glass-blur: 16px;
+    --glass-bg: rgba(32, 28, 22, 0.58);
+    --glass-bg-strong: rgba(28, 24, 19, 0.78);
+    --glass-border: rgba(255, 255, 255, 0.07);
   }
   * { box-sizing: border-box; }
-  body { margin: 0; background: var(--bg); color: var(--text); font-family: var(--sans); line-height: 1.5; }
-  .wrap { max-width: 880px; margin: 0 auto; padding: 28px 24px 80px; }
+  html, body { height: 100%; }
+  body {
+    margin: 0; color: var(--text); font-family: var(--sans); line-height: 1.5;
+    background: var(--bg);
+  }
+  /* decorative background blobs behind the glass — pure CSS gradients, no image asset */
+  body::before {
+    content: ""; position: fixed; inset: 0; z-index: -1; pointer-events: none;
+    background:
+      radial-gradient(600px 500px at 12% 8%, rgba(217,138,82,0.16), transparent 60%),
+      radial-gradient(700px 550px at 88% 82%, rgba(138,168,126,0.10), transparent 60%),
+      radial-gradient(900px 700px at 50% 100%, rgba(217,138,82,0.06), transparent 70%),
+      var(--bg);
+  }
   [hidden] { display: none !important; }
 
-  header.top {
-    display: flex; align-items: center; justify-content: space-between; gap: 16px;
-    padding-bottom: 20px; margin-bottom: 26px; border-bottom: 1px solid var(--border-soft);
+  .glass {
+    background: var(--glass-bg);
+    border: 1px solid var(--glass-border);
+    -webkit-backdrop-filter: blur(var(--glass-blur));
+    backdrop-filter: blur(var(--glass-blur));
   }
-  .brand { display: flex; align-items: center; gap: 12px; }
-  .brand .mark {
-    width: 34px; height: 34px; border-radius: 9px;
+  @media (prefers-reduced-transparency: reduce) {
+    .glass { background: var(--bg-elevated); backdrop-filter: none; -webkit-backdrop-filter: none; }
+  }
+
+  /* --- app shell: icon rail + content --- */
+  .shell { display: flex; min-height: 100vh; }
+  .rail {
+    width: 76px; flex: none; display: flex; flex-direction: column; align-items: center;
+    gap: 10px; padding: 20px 0; position: sticky; top: 0; height: 100vh;
+  }
+  .rail .mark {
+    width: 42px; height: 42px; border-radius: 13px; margin-bottom: 10px;
     background: linear-gradient(155deg, var(--accent), #a85f2e);
     display: flex; align-items: center; justify-content: center;
-    font-size: 16px; font-weight: 700; color: #1a1208; flex: none;
+    font-size: 18px; font-weight: 700; color: #1a1208; flex: none;
   }
-  .brand h1 { font-size: 16px; margin: 0; }
-  .brand p { margin: 2px 0 0; font-size: 12.5px; color: var(--text-faint); }
-  .top-meta { font-size: 12px; color: var(--text-faint); text-align: right; }
-  .top-meta b { color: var(--text-dim); }
-  .link-btn { background: none; border: none; color: var(--accent-strong); font: inherit; font-size: 12.5px; cursor: pointer; padding: 0; }
-  .link-btn:hover { text-decoration: underline; }
+  .rail-btn {
+    width: 46px; height: 46px; border-radius: 14px; border: 1px solid transparent;
+    background: none; color: var(--text-faint); cursor: pointer;
+    display: flex; align-items: center; justify-content: center; transition: all .15s;
+  }
+  .rail-btn svg { width: 20px; height: 20px; }
+  .rail-btn:hover { background: var(--bg-card-hover); color: var(--text-dim); }
+  .rail-btn.active { background: var(--accent-soft); border-color: rgba(217,138,82,.35); color: var(--accent-strong); }
+  .rail-spacer { flex: 1; }
+  .rail .status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--text-faint); margin-bottom: 14px; }
+  .rail .status-dot.on { background: var(--success); box-shadow: 0 0 8px rgba(138,168,126,.6); }
 
-  .card {
-    background: var(--bg-elevated); border: 1px solid var(--border-soft);
-    border-radius: 12px; padding: 22px; margin-bottom: 16px;
+  .main { flex: 1; min-width: 0; padding: 28px 32px 80px; }
+  .wrap { max-width: 900px; margin: 0 auto; }
+  .tab-panel[hidden] { display: none; }
+
+  .hero {
+    border-radius: 22px; padding: 26px 28px; margin-bottom: 20px;
+    display: flex; align-items: center; justify-content: space-between; gap: 20px; flex-wrap: wrap;
   }
+  .hero .greeting { font-size: 20px; font-weight: 650; margin: 0 0 4px; }
+  .hero .greeting-sub { font-size: 13px; color: var(--text-dim); margin: 0; }
+  .hero-stats { display: flex; gap: 28px; }
+  .hero-stat .n { font-size: 30px; font-weight: 700; letter-spacing: -0.5px; color: var(--accent-strong); line-height: 1; }
+  .hero-stat .l { font-size: 11px; color: var(--text-faint); text-transform: uppercase; letter-spacing: .5px; margin-top: 5px; }
+
+  .card { border-radius: 18px; padding: 22px; margin-bottom: 16px; }
   .card h2 { font-size: 15px; margin: 0 0 4px; }
   .card .sub { font-size: 12.5px; color: var(--text-faint); margin: 0 0 18px; }
 
   .field { margin-bottom: 14px; }
   .field label { display: block; font-size: 12px; font-weight: 600; color: var(--text-dim); margin-bottom: 6px; }
   .field .hint { font-size: 11px; color: var(--text-faint); margin-top: 5px; }
-  input[type=text], input[type=password], input[type=number], select, textarea {
+  input[type=text], input[type=password], input[type=number], input[type=search], select, textarea {
     width: 100%; font: inherit; font-size: 13px; color: var(--text);
-    background: var(--bg-input); border: 1px solid var(--border); border-radius: 8px;
-    padding: 9px 11px; outline: none; transition: border-color .12s;
+    background: var(--bg-input); border: 1px solid var(--border); border-radius: 10px;
+    padding: 10px 12px; outline: none; transition: border-color .12s;
   }
   input:focus, select:focus, textarea:focus { border-color: var(--accent); }
   textarea { resize: vertical; min-height: 60px; font-family: var(--sans); }
@@ -74,9 +119,13 @@
   label.checkbox { display: flex; align-items: center; gap: 8px; font-size: 12.5px; color: var(--text-dim); cursor: pointer; }
   label.checkbox input { width: auto; }
 
+  .search-wrap { position: relative; margin-bottom: 16px; }
+  .search-wrap svg { position: absolute; left: 14px; top: 50%; transform: translateY(-50%); width: 16px; height: 16px; color: var(--text-faint); }
+  .search-wrap input { padding-left: 38px; border-radius: 14px; padding-top: 12px; padding-bottom: 12px; }
+
   .provider-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 18px; }
   .provider-opt {
-    border: 1px solid var(--border); background: var(--bg-card); border-radius: 9px;
+    border: 1px solid var(--border); background: var(--bg-card); border-radius: 12px;
     padding: 11px 8px; text-align: center; cursor: pointer; font-size: 12px; font-weight: 600; color: var(--text-dim);
   }
   .provider-opt:hover { background: var(--bg-card-hover); }
@@ -84,7 +133,7 @@
 
   .btn {
     font: inherit; font-size: 13px; font-weight: 650; color: var(--text); background: var(--bg-card);
-    border: 1px solid var(--border); border-radius: 8px; padding: 10px 18px; cursor: pointer;
+    border: 1px solid var(--border); border-radius: 10px; padding: 10px 18px; cursor: pointer;
   }
   .btn:hover { background: var(--bg-card-hover); }
   .btn:disabled { opacity: .4; cursor: not-allowed; }
@@ -98,12 +147,12 @@
 
   .security-note {
     display: flex; gap: 8px; font-size: 11.5px; color: var(--text-faint);
-    background: var(--bg-card); border: 1px solid var(--border-soft); border-radius: 8px; padding: 9px 11px; margin-top: 4px;
+    background: var(--bg-card); border: 1px solid var(--border-soft); border-radius: 10px; padding: 9px 11px; margin-top: 4px;
   }
 
   .project-row {
-    display: flex; align-items: center; gap: 12px; padding: 12px 14px;
-    border: 1px solid var(--border-soft); border-radius: 9px; margin-bottom: 8px; cursor: pointer; background: var(--bg-card);
+    display: flex; align-items: center; gap: 12px; padding: 13px 14px;
+    border: 1px solid var(--border-soft); border-radius: 14px; margin-bottom: 8px; cursor: pointer; background: var(--bg-card);
   }
   .project-row:hover { background: var(--bg-card-hover); }
   .project-row.active { border-color: var(--accent); background: var(--accent-soft); }
@@ -125,7 +174,7 @@
 
   .suggestion-card {
     background: var(--bg-card); border: 1px solid var(--border-soft); border-left: 3px solid var(--accent);
-    border-radius: 10px; padding: 16px 18px; margin-bottom: 14px;
+    border-radius: 14px; padding: 16px 18px; margin-bottom: 14px;
   }
   .suggestion-card.unsafe { border-left-color: var(--danger); }
   .suggestion-card.decided-accepted { border-left-color: var(--success); }
@@ -137,13 +186,13 @@
   .badge.seen { background: var(--bg-elevated); color: var(--text-faint); }
   .warn-banner {
     background: var(--danger-soft); border: 1px solid rgba(192,101,86,.35); color: #e3a99d;
-    border-radius: 8px; padding: 9px 12px; font-size: 12.5px; margin-bottom: 10px;
+    border-radius: 10px; padding: 9px 12px; font-size: 12.5px; margin-bottom: 10px;
   }
   .undersourced-banner {
     background: var(--warn-soft); border: 1px solid rgba(201,162,39,.35); color: #e0c465;
-    border-radius: 8px; padding: 9px 12px; font-size: 12.5px; margin-bottom: 10px;
+    border-radius: 10px; padding: 9px 12px; font-size: 12.5px; margin-bottom: 10px;
   }
-  .instruction { font-family: var(--mono); font-size: 12.5px; background: var(--bg-elevated); border: 1px solid var(--border-soft); border-radius: 7px; padding: 9px 12px; margin-bottom: 10px; }
+  .instruction { font-family: var(--mono); font-size: 12.5px; background: var(--bg-elevated); border: 1px solid var(--border-soft); border-radius: 9px; padding: 9px 12px; margin-bottom: 10px; }
   .evidence .label { font-size: 11px; text-transform: uppercase; letter-spacing: .5px; color: var(--text-faint); margin-bottom: 6px; }
   .quote { display: flex; gap: 8px; align-items: baseline; font-size: 12.5px; padding: 4px 0; border-bottom: 1px dashed var(--border-soft); }
   .quote:last-child { border-bottom: none; }
@@ -160,123 +209,175 @@
   .applied-tag { font-size: 11px; font-weight: 700; color: var(--success); }
 
   .apply-bar {
-    position: sticky; bottom: 16px; margin-top: 20px;
-    background: var(--bg-elevated); border: 1px solid var(--border); border-radius: 12px;
+    position: sticky; bottom: 16px; margin-top: 20px; border-radius: 16px;
     padding: 14px 18px; display: flex; align-items: center; justify-content: space-between; gap: 14px;
-    box-shadow: 0 8px 30px rgba(0,0,0,.4);
+    box-shadow: 0 12px 34px rgba(0,0,0,.45);
   }
   .apply-bar .counts { font-size: 12.5px; color: var(--text-dim); }
   .apply-bar .counts b { color: var(--text); }
 
   .toast {
     background: var(--success-soft); border: 1px solid rgba(138,168,126,.4); color: var(--success);
-    border-radius: 10px; padding: 12px 16px; margin-bottom: 16px; font-size: 13px;
+    border-radius: 14px; padding: 12px 16px; margin-bottom: 16px; font-size: 13px;
   }
   .toast pre { white-space: pre-wrap; font-family: var(--mono); font-size: 11.5px; color: var(--text-dim); margin: 8px 0 0; }
   .empty { text-align: center; padding: 30px; color: var(--text-faint); font-size: 13px; }
-  .error-banner { background: var(--danger-soft); border: 1px solid rgba(192,101,86,.4); color: #e3a99d; border-radius: 10px; padding: 12px 16px; margin-bottom: 16px; font-size: 13px; }
+  .error-banner { background: var(--danger-soft); border: 1px solid rgba(192,101,86,.4); color: #e3a99d; border-radius: 14px; padding: 12px 16px; margin-bottom: 16px; font-size: 13px; }
+
+  .stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; margin-bottom: 16px; }
+  .stat-tile { border-radius: 16px; padding: 16px 18px; }
+  .stat-tile .n { font-size: 26px; font-weight: 700; letter-spacing: -0.4px; }
+  .stat-tile .l { font-size: 11px; color: var(--text-faint); text-transform: uppercase; letter-spacing: .5px; margin-top: 4px; }
+  .stat-tile.accent .n { color: var(--accent-strong); }
+  .stat-tile.good .n { color: var(--success); }
+  .stat-tile.bad .n { color: var(--danger); }
+  .hbar-row { display: flex; align-items: center; gap: 10px; margin: 9px 0; font-size: 12.5px; }
+  .hbar-label { width: 110px; flex: none; color: var(--text-dim); }
+  .hbar-track { flex: 1; height: 9px; background: var(--bg-elevated); border-radius: 6px; overflow: hidden; }
+  .hbar-fill { height: 100%; background: var(--accent); }
+  .hbar-count { width: 26px; text-align: right; color: var(--text-faint); font-size: 11.5px; }
 </style>
 </head>
 <body>
-<div class="wrap">
-  <header class="top">
-    <div class="brand">
-      <div class="mark">SR</div>
-      <div>
-        <h1>Session Reviewer</h1>
-        <p>Find your repeated coding mistakes, review the fix, decide what sticks.</p>
-      </div>
-    </div>
-    <div class="top-meta" id="top-meta"></div>
-  </header>
+<div class="shell">
+  <aside class="rail glass">
+    <div class="mark">👻</div>
+    <button class="rail-btn active" data-tab="home" title="Home">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 11l9-8 9 8"/><path d="M5 10v10h14V10"/></svg>
+    </button>
+    <button class="rail-btn" data-tab="provider" title="Provider">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.7 1.7 0 00.34 1.87l.06.06a2 2 0 11-2.83 2.83l-.06-.06a1.7 1.7 0 00-1.87-.34 1.7 1.7 0 00-1 1.55V21a2 2 0 11-4 0v-.09a1.7 1.7 0 00-1-1.55 1.7 1.7 0 00-1.87.34l-.06.06a2 2 0 11-2.83-2.83l.06-.06a1.7 1.7 0 00.34-1.87 1.7 1.7 0 00-1.55-1H3a2 2 0 110-4h.09a1.7 1.7 0 001.55-1 1.7 1.7 0 00-.34-1.87l-.06-.06a2 2 0 112.83-2.83l.06.06a1.7 1.7 0 001.87.34H9a1.7 1.7 0 001-1.55V3a2 2 0 114 0v.09a1.7 1.7 0 001 1.55 1.7 1.7 0 001.87-.34l.06-.06a2 2 0 112.83 2.83l-.06.06a1.7 1.7 0 00-.34 1.87V9a1.7 1.7 0 001.55 1H21a2 2 0 110 4h-.09a1.7 1.7 0 00-1.55 1z"/></svg>
+    </button>
+    <button class="rail-btn" data-tab="analytics" title="Analytics">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20V10"/><path d="M12 20V4"/><path d="M20 20v-7"/></svg>
+    </button>
+    <div class="rail-spacer"></div>
+    <div class="status-dot" id="status-dot" title="Provider not configured"></div>
+  </aside>
 
-  <!-- SETUP -->
-  <section class="card" id="screen-setup">
-    <h2>1. Choose a model provider</h2>
-    <p class="sub">Anthropic is the default. Your key stays in this app's memory for this run only, unless you check "remember".</p>
+  <main class="main">
+    <div class="wrap">
 
-    <div class="provider-grid" id="provider-grid">
-      <div class="provider-opt active" data-provider="anthropic">Anthropic<br>(Claude)</div>
-      <div class="provider-opt" data-provider="openai">OpenAI<br>(ChatGPT)</div>
-      <div class="provider-opt" data-provider="gemini">Google<br>(Gemini)</div>
-      <div class="provider-opt" data-provider="ollama">Ollama<br>(local/open-source)</div>
-    </div>
+      <!-- HOME -->
+      <section class="tab-panel" data-tab="home">
+        <div class="hero glass">
+          <div>
+            <p class="greeting" id="greeting">Good to see you 👋</p>
+            <p class="greeting-sub">Find your repeated coding mistakes, review the fix, decide what sticks.</p>
+          </div>
+          <div class="hero-stats" id="hero-stats"></div>
+        </div>
 
-    <div class="field" id="field-key">
-      <label for="api-key">API key</label>
-      <input type="password" id="api-key" placeholder="sk-ant-...">
-      <div class="hint" id="key-hint"></div>
-    </div>
-    <div class="field" id="field-host" hidden>
-      <label for="ollama-host">Ollama host</label>
-      <input type="text" id="ollama-host" value="http://localhost:11434">
-      <div class="hint">Make sure <code>ollama serve</code> is running locally. No key needed.</div>
-    </div>
+        <div class="card glass" id="not-configured-card" hidden>
+          <h2>Configure a provider to get started</h2>
+          <p class="sub">Pick Anthropic, OpenAI, Gemini, or a local Ollama model on the Provider tab — it only takes a moment.</p>
+          <button class="btn primary" id="go-to-provider">Go to Provider →</button>
+        </div>
 
-    <div class="row">
-      <div class="field">
-        <label for="model">Synthesis model <span style="color:var(--text-faint);font-weight:400;">(clusters + writes suggestions)</span></label>
-        <input type="text" id="model">
-      </div>
-      <div class="field">
-        <label for="fast-model">Extraction model <span style="color:var(--text-faint);font-weight:400;">(reads each transcript, cheaper)</span></label>
-        <input type="text" id="fast-model">
-      </div>
-    </div>
+        <div id="home-configured" hidden>
+          <div class="card glass" id="picker-card">
+            <h2>Pick a repo to review</h2>
+            <p class="sub">Scanned the known session-store locations for Claude Code, Codex, and Antigravity CLI on this machine — not your whole disk.</p>
+            <div class="search-wrap">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><path d="M21 21l-4.3-4.3"/></svg>
+              <input type="search" id="project-filter" placeholder="Filter repos by path…">
+            </div>
+            <div id="projects-list"></div>
+            <div class="row" style="align-items:flex-end;">
+              <div class="field" style="flex:none;width:140px;">
+                <label for="sessions-n">Sessions to review</label>
+                <input type="number" id="sessions-n" value="10" min="1" max="50">
+              </div>
+              <div class="field" style="flex:none;">
+                <button class="btn primary" id="scan-btn" disabled>Scan this repo →</button>
+              </div>
+            </div>
+          </div>
 
-    <label class="checkbox" id="remember-row">
-      <input type="checkbox" id="remember"> Remember this key on this device (writes to .env next to the script)
-    </label>
-    <div class="security-note">🔒 This app only listens on your own machine (127.0.0.1) — the key never leaves it except to call the provider you picked.</div>
+          <div class="card glass" id="screen-scanning" hidden>
+            <h2>Reviewing your sessions…</h2>
+            <div class="progress-line"><span class="spinner"></span><span id="scan-status">queued</span></div>
+            <div id="scan-error" class="error-banner" hidden></div>
+          </div>
 
-    <div id="setup-error" class="error-banner" hidden></div>
-    <div style="margin-top:18px;">
-      <button class="btn primary" id="continue-btn">Continue →</button>
-    </div>
-  </section>
+          <div id="screen-review" hidden>
+            <div class="card glass">
+              <h2>Review suggestions</h2>
+              <p class="sub" id="review-sub"></p>
+            </div>
+            <div id="toast-area"></div>
+            <div id="suggestions"></div>
+            <div class="apply-bar glass" id="apply-bar" hidden>
+              <div class="counts" id="apply-counts"></div>
+              <div style="display:flex;gap:8px;">
+                <button class="btn small" id="scan-another">Scan another repo</button>
+                <button class="btn primary" id="apply-btn">Apply approved →</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
 
-  <!-- PROJECT PICKER -->
-  <section class="card" id="screen-projects" hidden>
-    <h2>2. Pick a repo to review</h2>
-    <p class="sub">Scanned the known session-store locations for Claude Code, Codex, and Antigravity CLI on this machine — not your whole disk.</p>
-    <div id="projects-list"></div>
-    <div class="row" style="align-items:flex-end;">
-      <div class="field" style="flex:none;width:140px;">
-        <label for="sessions-n">Sessions to review</label>
-        <input type="number" id="sessions-n" value="10" min="1" max="50">
-      </div>
-      <div class="field" style="flex:none;">
-        <button class="btn primary" id="scan-btn" disabled>Scan this repo →</button>
-      </div>
-      <div class="field">
-        <button class="btn small" id="back-to-setup">← change provider</button>
-      </div>
-    </div>
-  </section>
+      <!-- PROVIDER -->
+      <section class="tab-panel" data-tab="provider" hidden>
+        <div class="card glass">
+          <h2>Model provider</h2>
+          <p class="sub">Anthropic is the default. Your key stays in this app's memory for this run only, unless you check "remember". Revisit this tab any time to switch providers.</p>
 
-  <!-- SCANNING -->
-  <section class="card" id="screen-scanning" hidden>
-    <h2>Reviewing your sessions…</h2>
-    <div class="progress-line"><span class="spinner"></span><span id="scan-status">queued</span></div>
-    <div id="scan-error" class="error-banner" hidden></div>
-  </section>
+          <div class="provider-grid" id="provider-grid">
+            <div class="provider-opt active" data-provider="anthropic">Anthropic<br>(Claude)</div>
+            <div class="provider-opt" data-provider="openai">OpenAI<br>(ChatGPT)</div>
+            <div class="provider-opt" data-provider="gemini">Google<br>(Gemini)</div>
+            <div class="provider-opt" data-provider="ollama">Ollama<br>(local/open-source)</div>
+          </div>
 
-  <!-- REVIEW -->
-  <section id="screen-review" hidden>
-    <div class="card">
-      <h2>3. Review suggestions</h2>
-      <p class="sub" id="review-sub"></p>
+          <div class="field" id="field-key">
+            <label for="api-key">API key</label>
+            <input type="password" id="api-key" placeholder="sk-ant-...">
+            <div class="hint" id="key-hint"></div>
+          </div>
+          <div class="field" id="field-host" hidden>
+            <label for="ollama-host">Ollama host</label>
+            <input type="text" id="ollama-host" value="http://localhost:11434">
+            <div class="hint">Make sure <code>ollama serve</code> is running locally. No key needed.</div>
+          </div>
+
+          <div class="row">
+            <div class="field">
+              <label for="model">Synthesis model <span style="color:var(--text-faint);font-weight:400;">(clusters + writes suggestions)</span></label>
+              <input type="text" id="model">
+            </div>
+            <div class="field">
+              <label for="fast-model">Extraction model <span style="color:var(--text-faint);font-weight:400;">(reads each transcript, cheaper)</span></label>
+              <input type="text" id="fast-model">
+            </div>
+          </div>
+
+          <label class="checkbox" id="remember-row">
+            <input type="checkbox" id="remember"> Remember this key on this device (writes to .env next to the script)
+          </label>
+          <div class="security-note">🔒 This app only listens on your own machine (127.0.0.1) — the key never leaves it except to call the provider you picked.</div>
+
+          <div id="setup-error" class="error-banner" hidden></div>
+          <div id="setup-ok" class="toast" hidden></div>
+          <div style="margin-top:18px;">
+            <button class="btn primary" id="continue-btn">Save provider →</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- ANALYTICS -->
+      <section class="tab-panel" data-tab="analytics" hidden>
+        <div class="card glass">
+          <h2>Analytics</h2>
+          <p class="sub">Everything below is real data already on this machine — nothing is tracked separately.</p>
+          <div class="stat-grid" id="analytics-stats"></div>
+          <div id="analytics-harness"></div>
+        </div>
+      </section>
+
     </div>
-    <div id="toast-area"></div>
-    <div id="suggestions"></div>
-    <div class="apply-bar" id="apply-bar" hidden>
-      <div class="counts" id="apply-counts"></div>
-      <div style="display:flex;gap:8px;">
-        <button class="btn small" id="scan-another">Scan another repo</button>
-        <button class="btn primary" id="apply-btn">Apply approved →</button>
-      </div>
-    </div>
-  </section>
+  </main>
 </div>
 
 <script>
@@ -287,7 +388,7 @@ const PROVIDER_DEFAULTS = {
   ollama: { model: "llama3.1", fast_model: "llama3.1" },
 };
 
-let state = { provider: "anthropic", jobId: null, projectPath: null, pollTimer: null };
+let state = { provider: "anthropic", jobId: null, projectPath: null, pollTimer: null, projects: [] };
 
 function $(id) { return document.getElementById(id); }
 function esc(s) { return (s ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c])); }
@@ -305,7 +406,27 @@ async function api(method, path, body) {
   return data;
 }
 
-// --- setup screen ---
+// --- tab navigation ---
+document.querySelectorAll(".rail-btn[data-tab]").forEach((btn) => {
+  btn.addEventListener("click", () => switchTab(btn.dataset.tab));
+});
+function switchTab(name) {
+  document.querySelectorAll(".rail-btn[data-tab]").forEach((b) => b.classList.toggle("active", b.dataset.tab === name));
+  document.querySelectorAll(".tab-panel").forEach((p) => { p.hidden = p.dataset.tab !== name; });
+  if (name === "analytics") loadAnalytics();
+}
+$("go-to-provider").addEventListener("click", () => switchTab("provider"));
+
+function greetingForNow() {
+  const h = new Date().getHours();
+  if (h < 5) return "Still up? 🌙";
+  if (h < 12) return "Good morning ☀️";
+  if (h < 18) return "Good afternoon";
+  return "Good evening";
+}
+$("greeting").textContent = `${greetingForNow()} 👋`;
+
+// --- provider tab ---
 document.querySelectorAll(".provider-opt").forEach((el) => {
   el.addEventListener("click", () => {
     document.querySelectorAll(".provider-opt").forEach((o) => o.classList.remove("active"));
@@ -330,7 +451,7 @@ function applyProviderDefaults() {
 applyProviderDefaults();
 
 $("continue-btn").addEventListener("click", async () => {
-  hide("setup-error");
+  hide("setup-error"); hide("setup-ok");
   const body = {
     provider: state.provider,
     model: $("model").value.trim(),
@@ -344,23 +465,40 @@ $("continue-btn").addEventListener("click", async () => {
   }
   try {
     await api("POST", "/api/session", body);
-    updateTopMeta();
-    await loadProjects();
+    $("setup-ok").textContent = `Saved — using ${state.provider}. Head to Home to pick a repo.`;
+    show("setup-ok");
+    updateStatusDot(true);
+    show("home-configured"); hide("not-configured-card");
+    if (!state.projects.length) await loadProjects();
   } catch (e) {
     $("setup-error").textContent = e.message;
     show("setup-error");
   }
 });
 
-function updateTopMeta() {
-  $("top-meta").innerHTML = `Provider: <b>${esc(state.provider)}</b>`;
+function updateStatusDot(on) {
+  const dot = $("status-dot");
+  dot.classList.toggle("on", on);
+  dot.title = on ? `Provider: ${state.provider}` : "Provider not configured";
 }
 
-// --- project picker ---
+// --- home / project picker ---
 async function loadProjects() {
-  hide("screen-setup");
-  show("screen-projects");
   const { projects } = await api("GET", "/api/projects");
+  state.projects = projects;
+  renderProjectList(projects);
+  updateHeroStats(projects);
+}
+
+function updateHeroStats(projects) {
+  const sessions = projects.reduce((a, p) => a + p.sessions, 0);
+  $("hero-stats").innerHTML = `
+    <div class="hero-stat"><div class="n">${projects.length}</div><div class="l">Repos detected</div></div>
+    <div class="hero-stat"><div class="n">${sessions}</div><div class="l">Sessions found</div></div>
+  `;
+}
+
+function renderProjectList(projects) {
   const list = $("projects-list");
   if (!projects.length) {
     list.innerHTML = `<div class="empty">No session history found yet for Claude Code, Codex, or Antigravity CLI on this machine.</div>`;
@@ -385,10 +523,13 @@ async function loadProjects() {
   });
 }
 
-$("back-to-setup").addEventListener("click", () => { hide("screen-projects"); show("screen-setup"); });
+$("project-filter").addEventListener("input", (e) => {
+  const q = e.target.value.toLowerCase();
+  renderProjectList(state.projects.filter((p) => p.path.toLowerCase().includes(q)));
+});
 
 $("scan-btn").addEventListener("click", async () => {
-  hide("screen-projects");
+  hide("picker-card");
   show("screen-scanning");
   $("scan-status").textContent = "queued";
   hide("scan-error");
@@ -428,7 +569,7 @@ function pollJob() {
   }, 1200);
 }
 
-// --- review screen ---
+// --- review ---
 function evidenceFromBlock(block) {
   return [...block.matchAll(/^- Session ([^:]+):\s*"([^"]*)"\s*(\[[^\]]*\])?/gm)].map((m) => ({
     file: m[1].trim(), quote: m[2], verified: /verified/i.test(m[3] || ""),
@@ -457,7 +598,7 @@ function renderSuggestions() {
   const job = state.job;
   const el = $("suggestions");
   if (!job.suggestions.length) {
-    el.innerHTML = `<div class="card"><div class="empty">No repeated mistakes found across 3+ sessions. Nothing to review.</div></div>`;
+    el.innerHTML = `<div class="card glass"><div class="empty">No repeated mistakes found across 3+ sessions. Nothing to review.</div></div>`;
     hide("apply-bar");
     return;
   }
@@ -558,19 +699,65 @@ $("apply-btn").addEventListener("click", async () => {
 $("scan-another").addEventListener("click", () => {
   hide("screen-review");
   $("toast-area").innerHTML = "";
+  show("picker-card");
   loadProjects();
 });
 
+// --- analytics tab ---
+async function loadAnalytics() {
+  const el = $("analytics-stats");
+  el.innerHTML = `<div class="empty">Loading…</div>`;
+  try {
+    const a = await api("GET", "/api/analytics");
+    el.innerHTML = [
+      ["repos_detected", "Repos detected", "accent"],
+      ["repos_worked_up", "Repos worked up", ""],
+      ["sessions_detected", "Sessions found", ""],
+      ["total_suggestions", "Suggestions surfaced", ""],
+      ["accepted", "Approved", "good"],
+      ["rejected", "Rejected", "bad"],
+      ["pending", "Pending decision", ""],
+    ].map(([key, label, cls]) => `
+      <div class="stat-tile glass ${cls}"><div class="n">${a[key] ?? 0}</div><div class="l">${label}</div></div>
+    `).join("");
+
+    const harnessEntries = Object.entries(a.by_harness || {});
+    if (harnessEntries.length) {
+      const max = Math.max(1, ...harnessEntries.map(([, v]) => v));
+      $("analytics-harness").innerHTML = `
+        <h2 style="font-size:13px;margin:22px 0 10px;">Repos detected by harness</h2>
+        ${harnessEntries.map(([h, v]) => `
+          <div class="hbar-row">
+            <div class="hbar-label">${esc(h)}</div>
+            <div class="hbar-track"><div class="hbar-fill" style="width:${(v / max) * 100}%"></div></div>
+            <div class="hbar-count">${v}</div>
+          </div>`).join("")}
+      `;
+    } else {
+      $("analytics-harness").innerHTML = "";
+    }
+  } catch (e) {
+    el.innerHTML = `<div class="error-banner">${esc(e.message)}</div>`;
+  }
+}
+
 // resume mid-session on refresh, since the server keeps state across reloads
 (async function init() {
+  await loadProjects().catch(() => {});
   try {
     const st = await api("GET", "/api/state");
     if (st.configured) {
       state.provider = st.provider;
-      updateTopMeta();
-      await loadProjects();
+      document.querySelectorAll(".provider-opt").forEach((o) => o.classList.toggle("active", o.dataset.provider === st.provider));
+      applyProviderDefaults();
+      updateStatusDot(true);
+      show("home-configured"); hide("not-configured-card");
+    } else {
+      show("not-configured-card"); hide("home-configured");
     }
-  } catch (e) { /* server not reachable yet on first paint — stay on setup */ }
+  } catch (e) {
+    show("not-configured-card"); hide("home-configured");
+  }
 })();
 </script>
 </body>

@@ -429,6 +429,25 @@ class TestParseSuggestions(unittest.TestCase):
         self.assertEqual(a.key, b.key)
 
 
+class TestLedgerStats(unittest.TestCase):
+    def test_aggregates_across_projects(self):
+        ledger = {
+            "proj1": {
+                "a": {"status": "accepted"},
+                "b": {"status": "rejected"},
+                "c": {"status": "seen"},
+            },
+            "proj2": {
+                "d": {"status": "accepted"},
+            },
+        }
+        stats = sr.ledger_stats(ledger)
+        self.assertEqual(stats, {"repos_worked_up": 2, "total_suggestions": 4, "accepted": 2, "rejected": 1, "pending": 1})
+
+    def test_empty_ledger(self):
+        self.assertEqual(sr.ledger_stats({}), {"repos_worked_up": 0, "total_suggestions": 0, "accepted": 0, "rejected": 0, "pending": 0})
+
+
 class TestLedger(unittest.TestCase):
     def test_new_run_marks_all_as_new_and_records_them(self):
         suggestions = sr.parse_suggestions(SAMPLE_REPORT)

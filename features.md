@@ -15,15 +15,16 @@ from the command line (`session_reviewer.py`) or a local point-and-click app
 
 ## 1a. The app (`python app.py`) — the whole thing without touching a flag
 
-A local web app (opens in your own browser, nothing hosted anywhere else)
-that walks you through the exact same pipeline as the CLI:
+A local web app (opens in your own browser, nothing hosted anywhere else),
+laid out as three tabs behind a small icon rail on the left:
 
-1. **Pick a provider** from a dropdown — Anthropic (default), OpenAI,
-   Gemini, or a local Ollama model — and enter a key (skip this for Ollama).
-2. **Pick a repo** — it scans the same known session-store folders the CLI
-   already knows about across your whole machine and shows you every project
-   with history, with session counts, so you don't have to type a path.
-3. **Review suggestions as cards** — each one explains itself: the
+### Home
+
+1. **Pick a repo** — a live "repos detected / sessions found" count up top,
+   then a searchable list of every project the app found session history
+   for, pulled from the same known session-store folders the CLI already
+   knows about across your whole machine — no path typing.
+2. **Review suggestions as cards** — each one explains itself: the
    instruction, the evidence quotes with verified/not-found tags, and any
    safety warning. Three choices per card:
    - **Approve** or **Reject** — just stages the decision.
@@ -34,9 +35,28 @@ that walks you through the exact same pipeline as the CLI:
      quote, because the written-to-disk evidence always comes from the
      original, already-verified suggestion, not from whatever the model said
      during the rewrite.
-4. **Apply** — one button, one confirmation, and every approved suggestion
+3. **Apply** — one button, one confirmation, and every approved suggestion
    is written to `CLAUDE.md`/`AGENTS.md` — same write path, same guardrail,
    same redaction pass as the CLI's `--apply`.
+
+### Provider
+
+Pick Anthropic (default), OpenAI, Gemini, or a local Ollama model, and enter
+a key (skip this for Ollama) — a settings panel you can come back to and
+switch any time, not a one-time gate. A dot at the bottom of the icon rail
+lights up once a provider is configured.
+
+### Analytics
+
+Real numbers already sitting on your machine, aggregated on the spot —
+nothing new is tracked to produce this:
+
+- **Repos detected** — every project `discover_projects()` found session
+  history for, and a breakdown by harness (Claude Code / Codex / Antigravity).
+- **Repos worked up** — how many distinct projects have ever had a suggestion
+  recorded for them (i.e. appear in `~/.session_reviewer/ledger.json`).
+- **Sessions found**, **suggestions surfaced**, and **approved / rejected /
+  pending** counts, summed across every project's ledger history.
 
 It binds to your own machine only (`127.0.0.1`) and was never meant to be
 reachable by anyone else — there's no login screen because there's no

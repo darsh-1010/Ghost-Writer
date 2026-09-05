@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Session Reviewer — finds repeated mistakes across your AI coding sessions
+"""Ghost Writer — finds repeated mistakes across your AI coding sessions
 for one project and suggests CLAUDE.md/AGENTS.md additions. By default it only
 prints a report; pass --apply to review suggestions one by one and optionally
 write accepted ones to a file. See README.md for usage and harness support.
@@ -902,6 +902,25 @@ def save_ledger(ledger: dict) -> None:
     p.write_text(json.dumps(ledger, indent=2), encoding="utf-8")
 
 
+def ledger_stats(ledger: dict) -> dict:
+    """All-time counts across every project ever reviewed — powers the app's
+    Analytics tab. Pure aggregation over the ledger already on disk, no new
+    tracking file: 'repos worked up' is just how many distinct project keys
+    the ledger has ever recorded a suggestion for."""
+    stats = {"repos_worked_up": len(ledger), "total_suggestions": 0, "accepted": 0, "rejected": 0, "pending": 0}
+    for project in ledger.values():
+        for entry in project.values():
+            stats["total_suggestions"] += 1
+            status = entry.get("status", "seen")
+            if status == "accepted":
+                stats["accepted"] += 1
+            elif status == "rejected":
+                stats["rejected"] += 1
+            else:
+                stats["pending"] += 1
+    return stats
+
+
 def filter_new_suggestions(
     suggestions: list[Suggestion], project_key: str, ledger: dict
 ) -> tuple[list[Suggestion], list[Suggestion]]:
@@ -1139,7 +1158,7 @@ def main(argv: list[str] | None = None) -> int:
             body += f"\n\n---\n{len(seen)} suggestion(s) suppressed as already seen in a previous run (see {ledger_path()})."
 
     header = (
-        f"# Session Reviewer report\n\n"
+        f"# Ghost Writer report\n\n"
         f"Project: `{project_path}`  \n"
         f"Harnesses: {', '.join(args.harnesses)}  \n"
         f"Sessions reviewed ({len(chosen)} of {len(all_matches)} found, most recent first):\n"

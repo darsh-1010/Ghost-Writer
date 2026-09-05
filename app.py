@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Session Reviewer — local web app.
+"""Ghost Writer — local web app.
 
 A GUI wrapper around session_reviewer.py's pipeline: pick a provider, scan
 this machine for projects with AI-coding session history, run the review,
@@ -175,6 +175,19 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/state":
                 with STATE_LOCK:
                     return self._send_json(dict(STATE))  # never holds the key itself, safe to return whole
+            if path == "/api/analytics":
+                projects = sr.discover_projects(["claude-code", "codex", "antigravity"])
+                by_harness: dict[str, int] = {}
+                for p in projects:
+                    for h in p["harnesses"]:
+                        by_harness[h] = by_harness.get(h, 0) + 1
+                with STATE_LOCK:
+                    ledger = sr.load_ledger()
+                stats = sr.ledger_stats(ledger)
+                stats["repos_detected"] = len(projects)
+                stats["sessions_detected"] = sum(p["sessions"] for p in projects)
+                stats["by_harness"] = by_harness
+                return self._send_json(stats)
             return self._serve_static(path)
         except Exception as e:  # noqa: BLE001
             log.exception("GET %s failed", path)
@@ -328,7 +341,7 @@ def main(argv: list[str] | None = None) -> int:
     # from outside this machine.
     server = ThreadingHTTPServer(("127.0.0.1", args.port), Handler)
     url = f"http://127.0.0.1:{args.port}/"
-    log.info("Session Reviewer app running at %s (Ctrl+C to stop)", url)
+    log.info("Ghost Writer app running at %s (Ctrl+C to stop)", url)
     if not args.no_browser:
         threading.Timer(0.4, lambda: webbrowser.open(url)).start()
     try:
