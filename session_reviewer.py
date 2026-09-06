@@ -705,11 +705,66 @@ Candidates:
 """
 
 
-def extract_candidates(session_text: str, model: str, provider: str = "auto") -> str:
-    """Cheap first pass: one small model call per session, no tools needed."""
+SECURITY_EXTRACT_PROMPT = """Read this transcript from one AI coding session. Find every SECURITY-relevant \
+mistake visible in it — a hardcoded secret, API key, password, or credential that got written into a file \
+or committed; a SQL, shell, or query string built by concatenating untrusted input instead of using \
+parameterization/escaping; an authentication, authorization, or input-validation check that was skipped, \
+disabled, or worked around; or any other OWASP-class issue. Ignore plain workflow friction (wrong flags, \
+forgotten steps) unless it also has a security angle.
+
+For each one, output exactly one line in this form, and NOTHING else on that line — no label, no \
+description, no colon-separated prefix, just a single quoted string:
+- "<verbatim quote from the transcript below, copied exactly, character for character>"
+
+Pick a quote short enough to stand alone (under ~200 characters) and specific enough to identify the \
+mistake on its own. Do not add commentary before or after the quote. If a quote would itself contain a \
+double-quote character, choose a different, shorter quote from the same transcript that doesn't need one.
+If nothing stands out, output nothing at all. No preamble, no summary line.
+
+Transcript:
+{text}
+"""
+
+SECURITY_SYNTHESIS_PROMPT = """Below are candidate quotes independently extracted from {n} separate AI \
+coding sessions in one project (most recent first), each already flagged as a SECURITY-relevant mistake — \
+a hardcoded secret, SQL/command built by string concatenation, a skipped auth/validation check, or similar \
+OWASP-class issue. Each line under a session header is one verbatim quote from that session's transcript, \
+already isolated — copy it exactly as given, do not alter it or wrap it in extra description.
+
+Find quotes from 3 OR MORE distinct session files that describe THE SAME underlying security mistake \
+(fewer than 3 does not count — skip it). Group those into one suggestion.
+
+For each suggestion, output a block in exactly this form:
+
+## Suggestion: <short title you write yourself, describing the security pattern>
+**Add to CLAUDE.md:** <one short instruction fixing the pattern>
+**Evidence:**
+- Session <exact filename>: "<the quote, copied exactly and only, from that session's candidate list — no label, no extra text>"
+- Session <exact filename>: "<a quote from a different session, same pattern>"
+- (one line per distinct session it appears in — need 3+ distinct filenames total)
+**Web source:** <one-sentence paraphrase in your own words of a credible best-practice source (e.g. OWASP), \
+then its URL> (omit this whole line if web search found nothing useful — do not force it, never paste \
+quoted text from the page)
+
+Hard rules:
+- Each evidence line must contain ONLY a filename and ONE quote copied character-for-character from that \
+session's candidate list below. Never combine a quote with your own description on the same line.
+- Do not invent a session filename — use only filenames that appear in a "=== SESSION: ... ===" header below.
+- If you use web search, paraphrase what you find in your own words; never quote the source text directly.
+- Output only Suggestion blocks, nothing else. If nothing repeats 3+ times, output exactly: \
+No repeated security mistakes found across 3+ sessions.
+
+Candidates:
+"""
+
+
+def extract_candidates(session_text: str, model: str, provider: str = "auto", prompt_template: str = EXTRACT_PROMPT) -> str:
+    """Cheap first pass: one small model call per session, no tools needed.
+    prompt_template swaps in SECURITY_EXTRACT_PROMPT for the security-pattern lens —
+    same pipeline, no new architecture."""
     if not session_text.strip():
         return ""
-    prompt = EXTRACT_PROMPT.format(text=session_text)
+    prompt = prompt_template.format(text=session_text)
     t0 = time.monotonic()
     text, in_tok, out_tok = _complete(model, prompt, max_tokens=1024, provider=provider)
     elapsed = time.monotonic() - t0
@@ -720,8 +775,8 @@ def extract_candidates(session_text: str, model: str, provider: str = "auto") ->
     return text
 
 
-def build_synthesis_prompt(candidates: dict[str, str], n: int) -> str:
-    parts = [SYNTHESIS_PROMPT.format(n=n)]
+def build_synthesis_prompt(candidates: dict[str, str], n: int, prompt_template: str = SYNTHESIS_PROMPT) -> str:
+    parts = [prompt_template.format(n=n)]
     for filename, text in candidates.items():
         parts.append(f"\n=== SESSION: {filename} ===\n{text or '(nothing flagged)'}\n")
     return "".join(parts)
@@ -830,9 +885,10 @@ class Suggestion:
     add_line: str  # the exact instruction text to append to CLAUDE.md/AGENTS.md
     block: str      # full markdown block, for display
     key: str        # stable id for the seen/rejected ledger
+    category: str = "workflow"  # "workflow" or "security" — which extraction pass produced it
 
 
-def parse_suggestions(report: str) -> list[Suggestion]:
+def parse_suggestions(report: str, category: str = "workflow") -> list[Suggestion]:
     blocks = re.split(r"(?=^## Suggestion)", report, flags=re.M)
     out: list[Suggestion] = []
     for b in blocks:
@@ -846,7 +902,7 @@ def parse_suggestions(report: str) -> list[Suggestion]:
         title = title_m.group(1).strip()
         add_line = add_m.group(1).strip()
         key = hashlib.sha256(add_line.lower().encode()).hexdigest()[:16]
-        out.append(Suggestion(title=title, add_line=add_line, block=b, key=key))
+        out.append(Suggestion(title=title, add_line=add_line, block=b, key=key, category=category))
     return out
 
 
@@ -962,6 +1018,48 @@ def filter_new_suggestions(
     return new, seen
 
 
+def _iso_to_epoch(iso: str) -> float:
+    return datetime.fromisoformat(iso).timestamp()
+
+
+def check_rule_effectiveness(
+    ledger: dict, project_key: str, sessions: dict[str, str], session_mtimes: dict[str, float]
+) -> list[dict]:
+    """For every suggestion this project's ledger already marked 'accepted', check whether any
+    of its original evidence quotes still shows up verbatim in a session recorded AFTER it was
+    accepted. Answers "did this rule actually stick?" using only data Ghost Writer already has —
+    ledger timestamps (accepted_at) plus the same substring search verify_quotes() already does.
+    No extra LLM call.
+    ponytail: literal substring match, not semantic — a rephrased recurrence of the same mistake
+    won't be caught. Upgrade to an LLM judge if that blind spot matters.
+    """
+    results = []
+    for key, entry in ledger.get(project_key, {}).items():
+        if entry.get("status") != "accepted" or not entry.get("accepted_at") or not entry.get("evidence_quotes"):
+            continue
+        cutoff = _iso_to_epoch(entry["accepted_at"])
+        recurrences = [
+            {"session": name, "quote": q}
+            for name, text in sessions.items()
+            if session_mtimes.get(name, 0) > cutoff
+            for q in entry["evidence_quotes"]
+            if q in text
+        ]
+        results.append({
+            "key": key,
+            "title": entry.get("title"),
+            "add_line": entry.get("add_line"),
+            "accepted_at": entry["accepted_at"],
+            "recurrences": recurrences,
+            "sticking": not recurrences,
+        })
+    log.info(
+        "rule effectiveness: %d accepted suggestion(s) checked, %d still recurring",
+        len(results), sum(1 for r in results if not r["sticking"]),
+    )
+    return results
+
+
 # --- guardrail: never let a suggestion smuggle an instruction into CLAUDE.md/AGENTS.md ---
 # CLAUDE.md/AGENTS.md are read as trusted instructions by every future AI agent
 # session in this project — so this is the one file this whole tool touches
@@ -1014,11 +1112,15 @@ def apply_flow(suggestions: list[Suggestion], ledger: dict, project_key: str, pr
         if ans == "q":
             break
         status = "accepted" if ans == "y" else "rejected"
-        ledger[project_key][s.key]["status"] = status
-        ledger[project_key][s.key]["last_seen"] = _now_iso()
-        log.info("suggestion %r: %s", s.title, status)
+        entry = ledger[project_key][s.key]
+        entry["status"] = status
+        entry["last_seen"] = _now_iso()
         if status == "accepted":
+            entry["accepted_at"] = entry.get("accepted_at") or _now_iso()
+            entry["add_line"] = s.add_line
+            entry["evidence_quotes"] = QUOTE_RE.findall(s.block)
             accepted.append(s)
+        log.info("suggestion %r: %s", s.title, status)
 
     if not accepted:
         print("\nNothing accepted — no file written.", file=sys.stderr)
@@ -1074,6 +1176,7 @@ class Args:
     fast_model: str
     provider: str
     harnesses: list[str]
+    security: bool
     apply: bool
     out: Path | None
     log_file: Path | None
@@ -1095,6 +1198,10 @@ def parse_args(argv: list[str]) -> Args:
     p.add_argument("--harnesses", default=DEFAULT_HARNESSES,
                    help=f"Comma-separated list to scan (default {DEFAULT_HARNESSES}). "
                         f"Also accepts cursor/opencode/hermes/grok/pi/antigravity-ide to report detection without parsing.")
+    p.add_argument("--security", action="store_true",
+                   help="Also run a second extraction+synthesis pass hunting specifically for security-relevant "
+                        "mistakes (hardcoded secrets, SQL/command built by string concatenation, skipped auth "
+                        "checks) instead of only workflow friction. Same pipeline, a prompt variant.")
     p.add_argument("--apply", action="store_true",
                    help="After the report, review new suggestions one by one and optionally write accepted ones")
     p.add_argument("-o", "--out", type=Path, default=None, help="Also write the report to this .md file")
@@ -1104,7 +1211,7 @@ def parse_args(argv: list[str]) -> Args:
     return Args(
         project=a.project, sessions=a.sessions, model=a.model, fast_model=a.fast_model, provider=a.provider,
         harnesses=[h.strip() for h in a.harnesses.split(",") if h.strip()],
-        apply=a.apply, out=a.out, log_file=a.log_file, verbose=a.verbose,
+        security=a.security, apply=a.apply, out=a.out, log_file=a.log_file, verbose=a.verbose,
     )
 
 
@@ -1156,13 +1263,25 @@ def main(argv: list[str] | None = None) -> int:
         synthesis_prompt = build_synthesis_prompt(candidates, len(chosen))
         log.info("synthesizing report...")
         raw_report = synthesize(synthesis_prompt, args.model, provider=args.provider)
+
+        sec_suggestions: list[Suggestion] = []
+        if args.security:
+            log.info("running security-pattern pass on %d session(s)...", len(sessions))
+            sec_candidates = {
+                name: extract_candidates(text, args.fast_model, args.provider, SECURITY_EXTRACT_PROMPT)
+                for name, text in sessions.items()
+            }
+            sec_prompt = build_synthesis_prompt(sec_candidates, len(chosen), SECURITY_SYNTHESIS_PROMPT)
+            sec_raw_report = synthesize(sec_prompt, args.model, provider=args.provider)
+            sec_report = verify_quotes(sec_raw_report, sessions)
+            sec_suggestions = parse_suggestions(sec_report, category="security")
     except (anthropic.APIError, urllib.error.URLError, RuntimeError, KeyError) as e:
         log.exception("model API call failed: %s", e)
         return 1
 
     report = verify_quotes(raw_report, sessions)
-    suggestions = parse_suggestions(report)
-    log.info("parsed %d suggestion(s) from the report", len(suggestions))
+    suggestions = parse_suggestions(report) + sec_suggestions
+    log.info("parsed %d suggestion(s) from the report (%d security)", len(suggestions), len(sec_suggestions))
 
     project_key = _norm(project_path)
     ledger = load_ledger()
@@ -1171,13 +1290,31 @@ def main(argv: list[str] | None = None) -> int:
     log.info("ledger: %d new, %d already seen (ledger: %s)", len(new), len(seen), ledger_path())
 
     if not suggestions:
-        body = report
+        body = report + (f"\n\n## Security-pattern findings\n\n{sec_report}" if args.security else "")
     elif not new:
         body = f"All {len(seen)} suggestion(s) were already surfaced in a previous run — nothing new. (ledger: {ledger_path()})"
     else:
-        body = "\n\n".join(s.block for s in new)
+        workflow_new = [s for s in new if s.category != "security"]
+        security_new = [s for s in new if s.category == "security"]
+        body = "\n\n".join(s.block for s in workflow_new)
+        if security_new:
+            body += "\n\n---\n## 🔒 Security-pattern findings\n\n" + "\n\n".join(s.block for s in security_new)
         if seen:
             body += f"\n\n---\n{len(seen)} suggestion(s) suppressed as already seen in a previous run (see {ledger_path()})."
+
+    effectiveness = check_rule_effectiveness(ledger, project_key, sessions, {ref.name: ref.mtime for ref in chosen})
+    if effectiveness:
+        eff_lines = ["\n\n---\n## Rule effectiveness (previously accepted suggestions)\n"]
+        for r in effectiveness:
+            if r["sticking"]:
+                eff_lines.append(f"- ✅ **{r['title']}** — no recurrence since accepted {r['accepted_at'][:10]}.")
+            else:
+                sess_list = ", ".join(sorted({rec['session'] for rec in r['recurrences']}))
+                eff_lines.append(
+                    f"- ⚠️ **{r['title']}** — still recurring in: {sess_list} (accepted {r['accepted_at'][:10]}). "
+                    "This rule doesn't seem to be sticking."
+                )
+        body += "\n".join(eff_lines)
 
     header = (
         f"# Ghost Writer report\n\n"

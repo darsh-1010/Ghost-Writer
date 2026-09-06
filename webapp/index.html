@@ -226,6 +226,7 @@
   .sc-title { font-size: 14.5px; font-weight: 650; margin: 0; }
   .badge { font-size: 10.5px; font-weight: 700; padding: 2px 8px; border-radius: 20px; white-space: nowrap; flex: none; }
   .badge.seen { background: var(--bg-elevated); color: var(--text-faint); }
+  .badge.security { background: var(--danger-soft); color: var(--danger); }
   .warn-banner {
     background: var(--danger-soft); border: 1px solid rgba(192,101,86,.35); color: #e3a99d;
     border-radius: 10px; padding: 9px 12px; font-size: 12.5px; margin-bottom: 10px;
@@ -293,6 +294,9 @@
     <button class="rail-btn" data-tab="analytics" title="Analytics">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20V10"/><path d="M12 20V4"/><path d="M20 20v-7"/></svg>
     </button>
+    <button class="rail-btn" data-tab="effectiveness" title="Rule effectiveness">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 11.08V12a10 10 0 11-5.93-9.14"/><path d="M22 4L12 14.01l-3-3"/></svg>
+    </button>
     <div class="rail-spacer"></div>
     <div class="status-dot" id="status-dot" title="Provider not configured"></div>
   </aside>
@@ -304,7 +308,7 @@
       <section class="tab-panel" data-tab="home">
         <div class="hero glass">
           <div>
-            <p class="greeting" id="greeting">Good to see you 👋</p>
+            <p class="greeting" id="greeting">Good to see you</p>
             <p class="greeting-sub">Find your repeated coding mistakes, review the fix, decide what sticks.</p>
           </div>
           <div class="hero-stats" id="hero-stats"></div>
@@ -338,6 +342,10 @@
                 <button class="btn primary" id="scan-btn" disabled>Scan this repo →</button>
               </div>
             </div>
+            <label class="checkbox" style="margin-top:2px;">
+              <input type="checkbox" id="security-pass" checked>
+              🔒 Also run a security-pattern pass (hardcoded secrets, SQL/command string concatenation, skipped auth checks) — a second, slower extraction+synthesis pass over the same sessions
+            </label>
           </div>
 
           <div class="card glass" id="screen-scanning" hidden>
@@ -422,6 +430,24 @@
         </div>
       </section>
 
+      <!-- EFFECTIVENESS -->
+      <section class="tab-panel" data-tab="effectiveness" hidden>
+        <div class="card glass">
+          <h2>Did it stick?</h2>
+          <p class="sub">For every suggestion you've previously approved in a repo, checks whether its evidence pattern still shows up in a session recorded after you accepted it — closing the loop Ghost Writer otherwise never closes.</p>
+          <div class="row" style="align-items:flex-end;">
+            <div class="field">
+              <label for="eff-project">Repo</label>
+              <select id="eff-project"></select>
+            </div>
+            <div class="field" style="flex:none;">
+              <button class="btn primary" id="eff-check-btn">Check effectiveness →</button>
+            </div>
+          </div>
+          <div id="eff-results"></div>
+        </div>
+      </section>
+
     </div>
   </main>
 </div>
@@ -460,6 +486,7 @@ function switchTab(name) {
   document.querySelectorAll(".rail-btn[data-tab]").forEach((b) => b.classList.toggle("active", b.dataset.tab === name));
   document.querySelectorAll(".tab-panel").forEach((p) => { p.hidden = p.dataset.tab !== name; });
   if (name === "analytics") loadAnalytics();
+  if (name === "effectiveness") loadEffectivenessProjects();
 }
 $("go-to-provider").addEventListener("click", () => switchTab("provider"));
 
@@ -472,7 +499,7 @@ function greetingPeriod() {
 
 let ghUsername = null;
 function renderGreeting() {
-  $("greeting").textContent = `${greetingPeriod()}${ghUsername ? ", " + ghUsername : ""} 👋`;
+  $("greeting").textContent = `${greetingPeriod()}${ghUsername ? ", " + ghUsername : ""}`;
 }
 renderGreeting();
 
@@ -603,6 +630,7 @@ $("scan-btn").addEventListener("click", async () => {
     const { job_id } = await api("POST", "/api/scan", {
       project_path: state.projectPath,
       sessions: Number($("sessions-n").value) || 10,
+      security: $("security-pass").checked,
     });
     state.jobId = job_id;
     pollJob();
@@ -620,6 +648,8 @@ function pollJob() {
       $("scan-status").textContent = {
         queued: "queued…", scanning: "scanning your sessions…",
         extracting: "extracting candidate mistakes…", synthesizing: "clustering + writing suggestions…",
+        extracting_security: "extracting security-pattern candidates…",
+        synthesizing_security: "clustering + writing security suggestions…",
       }[job.status] || job.status;
       if (job.status === "done") return renderReview(job);
       if (job.status === "error") {
@@ -678,7 +708,10 @@ function renderSuggestions() {
       <div class="suggestion-card ${isUnsafe ? "unsafe" : ""} ${cls}" data-id="${s.id}">
         <div class="sc-head">
           <h3 class="sc-title">${esc(s.title)}</h3>
-          ${s.already_seen ? '<span class="badge seen">already seen before</span>' : ""}
+          <div style="display:flex;gap:6px;flex:none;">
+            ${s.category === "security" ? '<span class="badge security">🔒 security</span>' : ""}
+            ${s.already_seen ? '<span class="badge seen">already seen before</span>' : ""}
+          </div>
         </div>
         ${isUnsafe ? `<div class="warn-banner">⚠️ Flagged by the safety guardrail (${esc(s.unsafe_reasons.join(", "))}) — this is what would be written to CLAUDE.md/AGENTS.md, so double-check it's a genuine coding note.</div>` : ""}
         ${under != null ? `<div class="undersourced-banner">⚠️ Only ${under} distinct session(s) cited — should be 3 or more.</div>` : ""}
@@ -806,6 +839,45 @@ async function loadAnalytics() {
     el.innerHTML = `<div class="error-banner">${esc(e.message)}</div>`;
   }
 }
+
+// --- effectiveness tab ---
+async function loadEffectivenessProjects() {
+  if (!state.projects.length) await loadProjects().catch(() => {});
+  const sel = $("eff-project");
+  sel.innerHTML = state.projects.map((p) => `<option value="${esc(p.path)}">${esc(p.path)}</option>`).join("")
+    || `<option value="">No repos detected</option>`;
+}
+
+$("eff-check-btn").addEventListener("click", async () => {
+  const project_path = $("eff-project").value;
+  const el = $("eff-results");
+  if (!project_path) { el.innerHTML = `<div class="empty">Pick a repo first.</div>`; return; }
+  el.innerHTML = `<div class="empty">Checking…</div>`;
+  try {
+    const { results } = await api("GET", `/api/effectiveness?project_path=${encodeURIComponent(project_path)}`);
+    if (!results.length) {
+      el.innerHTML = `<div class="empty">No previously accepted suggestions with recorded evidence for this repo yet — accept one from a scan, then check back after a later run.</div>`;
+      return;
+    }
+    el.innerHTML = results.map((r) => {
+      const sessions = [...new Set(r.recurrences.map((x) => x.session))];
+      return `
+        <div class="suggestion-card ${r.sticking ? "decided-accepted" : "unsafe"}">
+          <div class="sc-head">
+            <h3 class="sc-title">${esc(r.title)}</h3>
+            <span class="badge ${r.sticking ? "" : "security"}">${r.sticking ? "✅ sticking" : "⚠️ recurring"}</span>
+          </div>
+          <div class="instruction">${esc(r.add_line || "")}</div>
+          <div class="sub" style="margin:0 0 6px;">Accepted ${esc((r.accepted_at || "").slice(0, 10))}</div>
+          ${r.sticking
+            ? `<div class="sub" style="margin:0;">No recurrence of the original evidence pattern since it was accepted.</div>`
+            : `<div class="undersourced-banner">This rule doesn't seem to be sticking — the same pattern still shows up in: ${esc(sessions.join(", "))}.</div>`}
+        </div>`;
+    }).join("");
+  } catch (e) {
+    el.innerHTML = `<div class="error-banner">${esc(e.message)}</div>`;
+  }
+});
 
 // resume mid-session on refresh, since the server keeps state across reloads
 (async function init() {

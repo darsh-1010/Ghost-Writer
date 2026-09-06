@@ -19,7 +19,7 @@ import uuid
 import webbrowser
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, urlparse
 
 import anthropic
 
@@ -48,7 +48,9 @@ JOBS: dict[str, dict] = {}
 KEY_ENV_VAR = {"anthropic": "ANTHROPIC_API_KEY", "openai": "OPENAI_API_KEY", "gemini": "GEMINI_API_KEY"}
 
 
-def _run_scan_job(job_id: str, project_path: Path, sessions_n: int, provider: str, model: str, fast_model: str) -> None:
+def _run_scan_job(
+    job_id: str, project_path: Path, sessions_n: int, provider: str, model: str, fast_model: str, security: bool = False,
+) -> None:
     job = JOBS[job_id]
     try:
         job["status"] = "scanning"
@@ -71,10 +73,23 @@ def _run_scan_job(job_id: str, project_path: Path, sessions_n: int, provider: st
         report = sr.verify_quotes(raw_report, sessions)
         parsed = sr.parse_suggestions(report)
 
+        if security:
+            job["status"] = "extracting_security"
+            sec_candidates = {
+                name: sr.extract_candidates(text, fast_model, provider, sr.SECURITY_EXTRACT_PROMPT)
+                for name, text in sessions.items()
+            }
+            sec_prompt = sr.build_synthesis_prompt(sec_candidates, len(chosen), sr.SECURITY_SYNTHESIS_PROMPT)
+            job["status"] = "synthesizing_security"
+            sec_raw_report = sr.synthesize(sec_prompt, model, provider=provider)
+            sec_report = sr.verify_quotes(sec_raw_report, sessions)
+            parsed += sr.parse_suggestions(sec_report, category="security")
+
         project_key = sr._norm(project_path)
         with STATE_LOCK:
             ledger = sr.load_ledger()
             new, seen = sr.filter_new_suggestions(parsed, project_key, ledger)
+            effectiveness = sr.check_rule_effectiveness(ledger, project_key, sessions, {r.name: r.mtime for r in chosen})
             sr.save_ledger(ledger)
 
         job["header"] = {
@@ -83,6 +98,7 @@ def _run_scan_job(job_id: str, project_path: Path, sessions_n: int, provider: st
             "sessions_found": len(all_matches),
             "sessions": [{"harness": r.harness, "name": r.name} for r in chosen],
         }
+        job["effectiveness"] = effectiveness
         job["suggestions"] = [
             {
                 "id": i,
@@ -90,6 +106,7 @@ def _run_scan_job(job_id: str, project_path: Path, sessions_n: int, provider: st
                 "add_line": s.add_line,
                 "block": s.block,
                 "key": s.key,
+                "category": s.category,
                 "status": "pending",
                 "unsafe_reasons": sr.unsafe_reasons(s.add_line),
                 "already_seen": False,
@@ -102,6 +119,7 @@ def _run_scan_job(job_id: str, project_path: Path, sessions_n: int, provider: st
                 "add_line": s.add_line,
                 "block": s.block,
                 "key": s.key,
+                "category": s.category,
                 "status": "pending",
                 "unsafe_reasons": sr.unsafe_reasons(s.add_line),
                 "already_seen": True,
@@ -190,6 +208,22 @@ class Handler(BaseHTTPRequestHandler):
                 stats["sessions_detected"] = sum(p["sessions"] for p in projects)
                 stats["by_harness"] = by_harness
                 return self._send_json(stats)
+            if path == "/api/effectiveness":
+                qs = parse_qs(urlparse(self.path).query)
+                project_path_str = (qs.get("project_path") or [None])[0]
+                if not project_path_str:
+                    return self._error(400, "project_path is required")
+                project_path = Path(project_path_str).expanduser()
+                if not project_path.exists():
+                    return self._error(400, f"project folder does not exist: {project_path_str}")
+                all_matches = sr.find_all_sessions(project_path, ["claude-code", "codex", "antigravity"])
+                sessions = {ref.name: sr.trim_session(ref) for ref in all_matches}
+                session_mtimes = {ref.name: ref.mtime for ref in all_matches}
+                project_key = sr._norm(project_path)
+                with STATE_LOCK:
+                    ledger = sr.load_ledger()
+                results = sr.check_rule_effectiveness(ledger, project_key, sessions, session_mtimes)
+                return self._send_json({"project": str(project_path), "results": results})
             return self._serve_static(path)
         except Exception as e:  # noqa: BLE001
             log.exception("GET %s failed", path)
@@ -250,10 +284,14 @@ class Handler(BaseHTTPRequestHandler):
             provider, model, fast_model = STATE["provider"], STATE["model"], STATE["fast_model"]
 
         job_id = uuid.uuid4().hex[:12]
-        JOBS[job_id] = {"status": "queued", "project_path": project_path_str, "suggestions": [], "header": None, "error": None}
+        JOBS[job_id] = {
+            "status": "queued", "project_path": project_path_str, "suggestions": [],
+            "header": None, "error": None, "effectiveness": [],
+        }
         thread = threading.Thread(
             target=_run_scan_job,
             args=(job_id, Path(project_path_str).expanduser(), int(body.get("sessions", 10)), provider, model, fast_model),
+            kwargs={"security": bool(body.get("security"))},
             daemon=True,
         )
         thread.start()
@@ -318,9 +356,13 @@ class Handler(BaseHTTPRequestHandler):
             now = sr._now_iso()
             for s in job["suggestions"]:
                 if s["status"] in ("accepted", "rejected"):
-                    proj.setdefault(s["key"], {"title": s["title"]})
-                    proj[s["key"]]["status"] = s["status"]
-                    proj[s["key"]]["last_seen"] = now
+                    entry = proj.setdefault(s["key"], {"title": s["title"]})
+                    entry["status"] = s["status"]
+                    entry["last_seen"] = now
+                    if s["status"] == "accepted":
+                        entry["accepted_at"] = entry.get("accepted_at") or now
+                        entry["add_line"] = s["add_line"]
+                        entry["evidence_quotes"] = sr.QUOTE_RE.findall(s["block"])
             sr.save_ledger(ledger)
 
         for s in accepted_dicts:
