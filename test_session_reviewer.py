@@ -51,6 +51,26 @@ class TestLoadDotenv(unittest.TestCase):
         sr.load_dotenv(Path("/no/such/.env"))  # must not raise
 
 
+class TestParseGithubUsername(unittest.TestCase):
+    def test_parses_ssh_and_https_urls(self):
+        cases = [
+            ("git@github.com:darsh-1010/Ghost-Writer.git", "darsh-1010"),
+            ("https://github.com/darsh-1010/Ghost-Writer.git", "darsh-1010"),
+            ("https://github.com/darsh-1010/Ghost-Writer", "darsh-1010"),
+        ]
+        for url, expected in cases:
+            self.assertEqual(sr._parse_github_username(url), expected)
+
+    def test_non_github_remote_returns_none(self):
+        self.assertIsNone(sr._parse_github_username("git@gitlab.com:someone/repo.git"))
+
+
+class TestGitRemoteUsername(unittest.TestCase):
+    def test_non_git_directory_returns_none(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            self.assertIsNone(sr.git_remote_username(Path(tmp)))
+
+
 class TestFindClaudeCode(unittest.TestCase):
     def test_matches_by_cwd_field_not_dirname(self):
         with tempfile.TemporaryDirectory() as tmp:

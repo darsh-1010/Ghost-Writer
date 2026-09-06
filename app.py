@@ -172,6 +172,8 @@ class Handler(BaseHTTPRequestHandler):
                 if not job:
                     return self._error(404, "unknown job id")
                 return self._send_json(job)
+            if path == "/api/whoami":
+                return self._send_json({"username": sr.git_remote_username()})
             if path == "/api/state":
                 with STATE_LOCK:
                     return self._send_json(dict(STATE))  # never holds the key itself, safe to return whole

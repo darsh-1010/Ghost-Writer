@@ -12,6 +12,7 @@ import json
 import logging
 import os
 import re
+import subprocess
 import sys
 import time
 import urllib.error
@@ -82,6 +83,27 @@ def save_env_var(key: str, value: str, path: Path = Path(__file__).with_name(".e
     lines.append(f"{key}={value}")
     path.write_text("\n".join(lines) + "\n", encoding="utf-8")
     log.info("saved %s to %s (remember-on-this-device was checked)", key, path)
+
+
+def _parse_github_username(remote_url: str) -> str | None:
+    m = re.search(r"github\.com[:/]([^/]+)/", remote_url)
+    return m.group(1) if m else None
+
+
+def git_remote_username(path: Path = Path(__file__).parent) -> str | None:
+    """Best-effort GitHub username, parsed from this repo's own git remote —
+    used only to personalize the app's greeting. Never raises: no git, no
+    remote, a non-GitHub remote, or any other failure just returns None."""
+    try:
+        result = subprocess.run(
+            ["git", "-C", str(path), "config", "--get", "remote.origin.url"],
+            capture_output=True, text=True, timeout=3,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return None
+    if result.returncode != 0 or not result.stdout.strip():
+        return None
+    return _parse_github_username(result.stdout.strip())
 
 
 def _norm(path: Path) -> str:

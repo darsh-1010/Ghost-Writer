@@ -20,6 +20,11 @@ laid out as three tabs behind a small icon rail on the left:
 
 ### Home
 
+0. **A greeting that's actually yours** — "Good morning/afternoon/evening,
+   `<your GitHub username>`", where the username is parsed straight from this
+   repo's own `git remote origin` URL (no login, no API call, no tracking).
+   A sun/moon button next to it switches the whole app between dark and a
+   frosted light theme — remembered per-browser, not sent anywhere.
 1. **Pick a repo** — a live "repos detected / sessions found" count up top,
    then a searchable list of every project the app found session history
    for, pulled from the same known session-store folders the CLI already
