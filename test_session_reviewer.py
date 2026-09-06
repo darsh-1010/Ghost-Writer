@@ -453,19 +453,25 @@ class TestLedgerStats(unittest.TestCase):
     def test_aggregates_across_projects(self):
         ledger = {
             "proj1": {
-                "a": {"status": "accepted"},
+                "a": {"status": "accepted", "accepted_at": "2026-01-01T00:00:00+00:00"},
                 "b": {"status": "rejected"},
                 "c": {"status": "seen"},
             },
             "proj2": {
-                "d": {"status": "accepted"},
+                "d": {"status": "accepted"},  # accepted before accepted_at was tracked — still "accepted", not "written"
             },
         }
         stats = sr.ledger_stats(ledger)
-        self.assertEqual(stats, {"repos_worked_up": 2, "total_suggestions": 4, "accepted": 2, "rejected": 1, "pending": 1})
+        self.assertEqual(
+            stats,
+            {"repos_worked_up": 2, "total_suggestions": 4, "accepted": 2, "rejected": 1, "pending": 1, "changes_written": 1},
+        )
 
     def test_empty_ledger(self):
-        self.assertEqual(sr.ledger_stats({}), {"repos_worked_up": 0, "total_suggestions": 0, "accepted": 0, "rejected": 0, "pending": 0})
+        self.assertEqual(
+            sr.ledger_stats({}),
+            {"repos_worked_up": 0, "total_suggestions": 0, "accepted": 0, "rejected": 0, "pending": 0, "changes_written": 0},
+        )
 
 
 class TestLedger(unittest.TestCase):

@@ -984,14 +984,24 @@ def ledger_stats(ledger: dict) -> dict:
     """All-time counts across every project ever reviewed — powers the app's
     Analytics tab. Pure aggregation over the ledger already on disk, no new
     tracking file: 'repos worked up' is just how many distinct project keys
-    the ledger has ever recorded a suggestion for."""
-    stats = {"repos_worked_up": len(ledger), "total_suggestions": 0, "accepted": 0, "rejected": 0, "pending": 0}
+    the ledger has ever recorded a suggestion for.
+    'changes_written' is the subset of 'accepted' that actually landed in a
+    CLAUDE.md/AGENTS.md file — accepted_at is only set at the moment
+    write_accepted_suggestions() runs (see apply_flow / app.py's
+    /api/apply), so it's the real "a change was made" signal, not just
+    "the user clicked approve"."""
+    stats = {
+        "repos_worked_up": len(ledger), "total_suggestions": 0,
+        "accepted": 0, "rejected": 0, "pending": 0, "changes_written": 0,
+    }
     for project in ledger.values():
         for entry in project.values():
             stats["total_suggestions"] += 1
             status = entry.get("status", "seen")
             if status == "accepted":
                 stats["accepted"] += 1
+                if entry.get("accepted_at"):
+                    stats["changes_written"] += 1
             elif status == "rejected":
                 stats["rejected"] += 1
             else:

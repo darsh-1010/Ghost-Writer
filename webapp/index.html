@@ -816,6 +816,7 @@ async function loadAnalytics() {
       ["accepted", "Approved", "good"],
       ["rejected", "Rejected", "bad"],
       ["pending", "Pending decision", ""],
+      ["changes_written", "Changes made to CLAUDE.md/AGENTS.md", "good"],
     ].map(([key, label, cls]) => `
       <div class="stat-tile glass ${cls}"><div class="n">${a[key] ?? 0}</div><div class="l">${label}</div></div>
     `).join("");
