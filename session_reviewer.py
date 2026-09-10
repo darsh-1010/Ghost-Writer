@@ -584,13 +584,17 @@ def resolve_provider(explicit: str, model: str) -> str:
     return detect_provider(model) if explicit in (None, "auto") else explicit
 
 
-def _openai_style_complete(model: str, prompt: str, max_tokens: int, url: str, api_key: str) -> tuple[str, int, int]:
+def _openai_style_complete(
+    model: str, prompt: str, max_tokens: int, url: str, api_key: str, extra_body: dict | None = None,
+) -> tuple[str, int, int]:
     """Shared by OpenAI and Ollama — Ollama's /v1/chat/completions is byte-for-byte
-    OpenAI-compatible (Ollama's own docs), so one function serves both."""
+    OpenAI-compatible (Ollama's own docs), so one function serves both.
+    extra_body is Ollama-only (its "options" block, e.g. num_ctx) — never sent to OpenAI."""
     body = json.dumps({
         "model": model,
         "messages": [{"role": "user", "content": prompt}],
         "max_tokens": max_tokens,
+        **(extra_body or {}),
     }).encode("utf-8")
     req = urllib.request.Request(
         url, data=body,
@@ -611,10 +615,36 @@ def _openai_complete(model: str, prompt: str, max_tokens: int) -> tuple[str, int
     return _openai_style_complete(model, prompt, max_tokens, "https://api.openai.com/v1/chat/completions", api_key)
 
 
+# Ollama defaults to a 2048 or 4096-token context window per model and SILENTLY
+# TRUNCATES whatever doesn't fit — unlike every cloud provider here, which sizes
+# the context to the model automatically. A single trimmed session can already be
+# ~5k tokens (MAX_CHARS_PER_SESSION=20_000 chars) and synthesis concatenates
+# candidates from up to 10 sessions at once, so without this, Ollama runs were
+# silently losing most of the transcript before the model ever saw it.
+# ponytail: a chars/4 estimate, not a real tokenizer — errs high on purpose
+# (padding below), overridable via OLLAMA_NUM_CTX if a model needs more/less
+# than this guesses, or if the machine can't afford the RAM a big num_ctx costs.
+_OLLAMA_MIN_NUM_CTX = 4096
+_OLLAMA_MAX_NUM_CTX = 65536
+
+
+def _ollama_num_ctx(prompt: str, max_tokens: int) -> int:
+    override = os.environ.get("OLLAMA_NUM_CTX")
+    if override:
+        return int(override)
+    estimated_prompt_tokens = len(prompt) // 4
+    return max(_OLLAMA_MIN_NUM_CTX, min(_OLLAMA_MAX_NUM_CTX, estimated_prompt_tokens + max_tokens + 512))
+
+
 def _ollama_complete(model: str, prompt: str, max_tokens: int) -> tuple[str, int, int]:
     host = (os.environ.get("OLLAMA_HOST") or "http://localhost:11434").rstrip("/")
+    num_ctx = _ollama_num_ctx(prompt, max_tokens)
+    log.debug("ollama: requesting num_ctx=%d for a %d-char prompt", num_ctx, len(prompt))
     # no real key: Ollama's OpenAI-compatible endpoint accepts (and ignores) any bearer value
-    return _openai_style_complete(model, prompt, max_tokens, f"{host}/v1/chat/completions", "ollama")
+    return _openai_style_complete(
+        model, prompt, max_tokens, f"{host}/v1/chat/completions", "ollama",
+        extra_body={"options": {"num_ctx": num_ctx}},
+    )
 
 
 def _gemini_complete(model: str, prompt: str, max_tokens: int) -> tuple[str, int, int]:

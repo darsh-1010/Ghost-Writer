@@ -49,6 +49,12 @@ model reads by ~50% with no loss in accuracy. Every quote gets tagged
 `✓ verified` or flagged if it isn't found verbatim in your real transcript.
 
 Supports Anthropic, OpenAI, Gemini, and local Ollama models (`--provider`).
+Ollama runs get no web-search-backed suggestions (Anthropic-only), and the
+extraction/synthesis prompt window is auto-sized to fit (`OLLAMA_NUM_CTX` to
+override) since Ollama's default context is small enough to silently
+truncate a real transcript otherwise. A small local model's hit rate on the
+security-pattern pass in particular will also be lower than Claude's — it's
+a more specialized judgment call than spotting workflow friction.
 Full breakdown of what's supported, the safety guardrails, and every flag →
 **[features.md](features.md)**.
 

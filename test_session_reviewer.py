@@ -366,6 +366,89 @@ class TestOpenAIComplete(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             sr._openai_complete("gpt-4o", "hi", max_tokens=10)
 
+    def test_no_options_block_sent_to_openai(self):
+        """extra_body is Ollama-only — OpenAI's real endpoint never sees an 'options' key."""
+        captured = {}
+
+        class FakeResponse:
+            def read(self):
+                return json.dumps({"choices": [{"message": {"content": "hi"}}], "usage": {}}).encode()
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+        def fake_urlopen(req, timeout=None):
+            captured["body"] = json.loads(req.data)
+            return FakeResponse()
+
+        os.environ["OPENAI_API_KEY"] = "sk-test"
+        try:
+            import urllib.request as ur
+            real_urlopen = ur.urlopen
+            ur.urlopen = fake_urlopen
+            try:
+                sr._openai_complete("gpt-4o", "hi", max_tokens=10)
+            finally:
+                ur.urlopen = real_urlopen
+        finally:
+            del os.environ["OPENAI_API_KEY"]
+
+        self.assertNotIn("options", captured["body"])
+
+
+class TestOllamaContextWindow(unittest.TestCase):
+    """Ollama silently truncates prompts past its default 2048/4096-token context
+    window — unlike every cloud provider here. _ollama_num_ctx() sizes it up."""
+
+    def setUp(self):
+        os.environ.pop("OLLAMA_NUM_CTX", None)
+
+    def tearDown(self):
+        os.environ.pop("OLLAMA_NUM_CTX", None)
+
+    def test_short_prompt_gets_the_floor(self):
+        self.assertEqual(sr._ollama_num_ctx("hi", max_tokens=100), sr._OLLAMA_MIN_NUM_CTX)
+
+    def test_long_prompt_scales_up_and_is_capped(self):
+        n = sr._ollama_num_ctx("x" * 500_000, max_tokens=8000)
+        self.assertGreater(n, sr._OLLAMA_MIN_NUM_CTX)
+        self.assertLessEqual(n, sr._OLLAMA_MAX_NUM_CTX)
+
+    def test_env_override_wins(self):
+        os.environ["OLLAMA_NUM_CTX"] = "12345"
+        self.assertEqual(sr._ollama_num_ctx("hi", max_tokens=100), 12345)
+
+    def test_ollama_complete_sends_num_ctx_option(self):
+        captured = {}
+
+        class FakeResponse:
+            def read(self):
+                return json.dumps({"choices": [{"message": {"content": "hi"}}], "usage": {}}).encode()
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+        def fake_urlopen(req, timeout=None):
+            captured["body"] = json.loads(req.data)
+            return FakeResponse()
+
+        import urllib.request as ur
+        real_urlopen = ur.urlopen
+        ur.urlopen = fake_urlopen
+        try:
+            sr._ollama_complete("llama3.1", "hi", max_tokens=100)
+        finally:
+            ur.urlopen = real_urlopen
+
+        self.assertIn("options", captured["body"])
+        self.assertEqual(captured["body"]["options"]["num_ctx"], sr._OLLAMA_MIN_NUM_CTX)
+
 
 class TestUnsafeInstructionGuardrail(unittest.TestCase):
     def test_flags_prompt_injection_style_instructions(self):
