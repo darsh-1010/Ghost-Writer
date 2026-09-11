@@ -46,10 +46,12 @@ laid out as three tabs behind a small icon rail on the left:
 
 ### Provider
 
-Pick Anthropic (default), OpenAI, Gemini, or a local Ollama model, and enter
-a key (skip this for Ollama) — a settings panel you can come back to and
-switch any time, not a one-time gate. A dot at the bottom of the icon rail
-lights up once a provider is configured.
+Pick Anthropic (default), OpenAI, Gemini, a local Ollama model, or
+OpenRouter (access to open-weight coding models like GLM/DeepSeek/Qwen/Kimi
+K2 through one key), and enter a key (skip this for Ollama, unless you also
+want its optional web-search key) — a settings panel you can come back to
+and switch any time, not a one-time gate. A dot at the bottom of the icon
+rail lights up once a provider is configured.
 
 ### Analytics
 
@@ -156,26 +158,41 @@ and trimming (raw bytes → characters actually sent).
   against your original transcripts either way).
 - Both models are configurable (`--model`, `--fast-model`) if you want to
   swap them out.
-- **You can point either model at OpenAI, Gemini, or a local Ollama model
-  instead of Claude** — pass a model name from that provider (`gpt-4o`,
-  `gemini-2.0-flash`, `llama3.1`, ...), set the matching key (none needed for
-  Ollama), and for Ollama add `--provider ollama` since its model names
-  don't self-identify. No litellm dependency — four small, plain HTTP
-  functions via Python's stdlib do it (Ollama reuses the OpenAI one: its
-  `/v1/chat/completions` endpoint is byte-for-byte OpenAI-compatible by
-  Ollama's own design). Trade-off, stated plainly: a non-Anthropic synthesis
-  pass skips §7 below (web search) entirely, logged as a warning rather than
-  faked. We looked at [litellm](https://github.com/BerriAI/litellm)
-  specifically and passed — it's a translation layer with a documented
-  history of dropping tool calls/citations when swapping providers, plus a
-  real 2026 supply-chain compromise of the package on PyPI. Not a trade
-  worth making for four small functions.
+- **You can point either model at OpenAI, Gemini, a local Ollama model, or
+  OpenRouter instead of Claude** — pass a model name from that provider
+  (`gpt-4o`, `gemini-2.0-flash`, `llama3.1`, `deepseek/deepseek-chat`, ...),
+  set the matching key (none needed for Ollama itself), and for Ollama or
+  OpenRouter add `--provider ollama`/`--provider openrouter` since neither
+  one's model names self-identify. No litellm dependency — small, plain
+  HTTP functions via Python's stdlib do it (Ollama and OpenRouter both reuse
+  the same OpenAI-compatible function: Ollama's `/v1/chat/completions` is
+  byte-for-byte OpenAI-compatible by Ollama's own design, and OpenRouter is
+  natively OpenAI-compatible). We looked at
+  [litellm](https://github.com/BerriAI/litellm) specifically and passed —
+  it's a translation layer with a documented history of dropping tool
+  calls/citations when swapping providers, plus a real 2026 supply-chain
+  compromise of the package on PyPI. Not a trade worth making for a handful
+  of small functions.
+- OpenRouter in particular is the practical way to try the current best
+  open-weight coding models (GLM, DeepSeek, Qwen, Kimi K2, ...) without
+  self-hosting a multi-GPU cluster — one `OPENROUTER_API_KEY` reaches all
+  of them.
 
 ## 7. Web-backed suggestions
 
 When it finds a repeated mistake, it can search the web for a credible
 best-practice source and include a one-sentence paraphrase plus a link — it
-never copy-pastes the source's own wording into your report.
+never copy-pastes the source's own wording into your report. Every
+provider gets its own *real* search mechanism rather than one faked
+interface (see CLAUDE.md on why): Anthropic's `web_search` tool (multi-turn
+tool loop), OpenAI's `web_search` tool on the Responses API (a different
+endpoint from normal chat), Gemini's Google Search grounding (one extra
+field on the same endpoint), OpenRouter's `:online` model-slug suffix, and
+Ollama's own hosted search at `ollama.com/api/web_search` — the one case
+where *we* run the tool-call loop client-side (opt-in, free `OLLAMA_API_KEY`
+from your Ollama account, separate from `OLLAMA_HOST`) since Ollama has no
+search of its own for a local model to call. Skip the Ollama key and
+synthesis still runs, just without a **Web source** line.
 
 ## 8. Remembers what it already told you
 

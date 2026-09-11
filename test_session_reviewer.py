@@ -399,10 +399,212 @@ class TestSynthesizeProviderDispatch(unittest.TestCase):
         self.assertEqual(result, "ok")
         self.assertEqual(calls, [True])
 
-    def test_ollama_stays_search_free(self):
+    def test_ollama_stays_search_free_without_api_key(self):
+        os.environ.pop("OLLAMA_API_KEY", None)
         with unittest.mock.patch.object(sr, "_complete", lambda *a, **k: ("ok", 1, 1)):
             result = sr.synthesize("prompt", "llama3.1", provider="ollama")
         self.assertEqual(result, "ok")
+
+    def test_ollama_routes_to_search_when_api_key_present(self):
+        calls = []
+        os.environ["OLLAMA_API_KEY"] = "test-key"
+        try:
+            with unittest.mock.patch.object(sr, "_ollama_search_complete", lambda *a, **k: (calls.append((a, k)) or ("ok", 1, 1))):
+                result = sr.synthesize("prompt", "llama3.1", provider="ollama")
+        finally:
+            del os.environ["OLLAMA_API_KEY"]
+        self.assertEqual(result, "ok")
+        self.assertEqual(len(calls), 1)
+
+    def test_openrouter_routes_to_online_suffix_search(self):
+        calls = []
+        with unittest.mock.patch.object(sr, "_openrouter_search_complete", lambda *a, **k: (calls.append(a) or ("ok", 1, 1))):
+            result = sr.synthesize("prompt", "deepseek/deepseek-chat", provider="openrouter")
+        self.assertEqual(result, "ok")
+        self.assertEqual(len(calls), 1)
+
+
+class TestOllamaWebSearch(unittest.TestCase):
+    """Ollama's local model has no search of its own — it emits a tool_call and WE
+    make the actual request to ollama.com's hosted search API on its behalf."""
+
+    def test_web_search_calls_ollama_hosted_endpoint(self):
+        captured = {}
+
+        class FakeResponse:
+            def read(self):
+                return json.dumps({"results": [{"title": "t", "url": "https://example.com", "content": "c"}]}).encode()
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+        def fake_urlopen(req, timeout=None):
+            captured["url"] = req.full_url
+            captured["headers"] = req.headers
+            captured["body"] = json.loads(req.data)
+            return FakeResponse()
+
+        import urllib.request as ur
+        real_urlopen = ur.urlopen
+        ur.urlopen = fake_urlopen
+        try:
+            results = sr._ollama_web_search("ponytail secret redaction", "test-search-key", max_results=3)
+        finally:
+            ur.urlopen = real_urlopen
+
+        self.assertEqual(captured["url"], "https://ollama.com/api/web_search")
+        self.assertEqual(captured["body"], {"query": "ponytail secret redaction", "max_results": 3})
+        self.assertEqual(results, [{"title": "t", "url": "https://example.com", "content": "c"}])
+
+    def test_search_complete_stops_when_model_returns_no_tool_calls(self):
+        """First turn, no tool_calls -> return immediately, no search call made."""
+        class FakeResponse:
+            def read(self):
+                return json.dumps({
+                    "choices": [{"message": {"role": "assistant", "content": "no search needed"}}],
+                    "usage": {"prompt_tokens": 5, "completion_tokens": 2},
+                }).encode()
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+        import urllib.request as ur
+        real_urlopen = ur.urlopen
+        ur.urlopen = lambda req, timeout=None: FakeResponse()
+        try:
+            with unittest.mock.patch.object(sr, "_ollama_web_search") as mock_search:
+                text, in_tok, out_tok = sr._ollama_search_complete("llama3.1", "prompt", max_tokens=100, search_api_key="k")
+        finally:
+            ur.urlopen = real_urlopen
+
+        self.assertEqual(text, "no search needed")
+        self.assertEqual((in_tok, out_tok), (5, 2))
+        mock_search.assert_not_called()
+
+    def test_search_complete_executes_tool_call_then_returns_final_answer(self):
+        responses = [
+            {
+                "choices": [{"message": {
+                    "role": "assistant", "content": None,
+                    "tool_calls": [{"id": "call_1", "function": {"name": "web_search", "arguments": '{"query": "owasp secrets"}'}}],
+                }}],
+                "usage": {"prompt_tokens": 10, "completion_tokens": 5},
+            },
+            {
+                "choices": [{"message": {"role": "assistant", "content": "grounded final answer"}}],
+                "usage": {"prompt_tokens": 20, "completion_tokens": 8},
+            },
+        ]
+
+        class FakeResponse:
+            def __init__(self, payload):
+                self.payload = payload
+
+            def read(self):
+                return json.dumps(self.payload).encode()
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+        call_log = {"n": 0}
+
+        def fake_urlopen(req, timeout=None):
+            i = call_log["n"]
+            call_log["n"] += 1
+            return FakeResponse(responses[i])
+
+        import urllib.request as ur
+        real_urlopen = ur.urlopen
+        ur.urlopen = fake_urlopen
+        try:
+            with unittest.mock.patch.object(sr, "_ollama_web_search", return_value=[{"title": "OWASP", "url": "https://owasp.org"}]) as mock_search:
+                text, in_tok, out_tok = sr._ollama_search_complete("llama3.1", "prompt", max_tokens=100, search_api_key="k")
+        finally:
+            ur.urlopen = real_urlopen
+
+        self.assertEqual(text, "grounded final answer")
+        self.assertEqual((in_tok, out_tok), (30, 13))
+        mock_search.assert_called_once_with("owasp secrets", "k")
+
+
+class TestOpenRouterComplete(unittest.TestCase):
+    def test_complete_hits_openrouter_endpoint(self):
+        captured = {}
+
+        class FakeResponse:
+            def read(self):
+                return json.dumps({"choices": [{"message": {"content": "hi"}}], "usage": {"prompt_tokens": 1, "completion_tokens": 1}}).encode()
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+        def fake_urlopen(req, timeout=None):
+            captured["url"] = req.full_url
+            captured["body"] = json.loads(req.data)
+            return FakeResponse()
+
+        os.environ["OPENROUTER_API_KEY"] = "sk-or-test"
+        try:
+            import urllib.request as ur
+            real_urlopen = ur.urlopen
+            ur.urlopen = fake_urlopen
+            try:
+                sr._openrouter_complete("deepseek/deepseek-chat", "hi", max_tokens=50)
+            finally:
+                ur.urlopen = real_urlopen
+        finally:
+            del os.environ["OPENROUTER_API_KEY"]
+
+        self.assertEqual(captured["url"], "https://openrouter.ai/api/v1/chat/completions")
+        self.assertEqual(captured["body"]["model"], "deepseek/deepseek-chat")
+
+    def test_search_complete_appends_online_suffix(self):
+        captured = {}
+
+        class FakeResponse:
+            def read(self):
+                return json.dumps({"choices": [{"message": {"content": "hi"}}], "usage": {}}).encode()
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+        def fake_urlopen(req, timeout=None):
+            captured["body"] = json.loads(req.data)
+            return FakeResponse()
+
+        os.environ["OPENROUTER_API_KEY"] = "sk-or-test"
+        try:
+            import urllib.request as ur
+            real_urlopen = ur.urlopen
+            ur.urlopen = fake_urlopen
+            try:
+                sr._openrouter_search_complete("deepseek/deepseek-chat", "hi", max_tokens=50)
+            finally:
+                ur.urlopen = real_urlopen
+        finally:
+            del os.environ["OPENROUTER_API_KEY"]
+
+        self.assertEqual(captured["body"]["model"], "deepseek/deepseek-chat:online")
+
+    def test_raises_clearly_without_api_key(self):
+        os.environ.pop("OPENROUTER_API_KEY", None)
+        with self.assertRaises(RuntimeError):
+            sr._openrouter_complete("deepseek/deepseek-chat", "hi", max_tokens=10)
 
 
 class TestDiscoverProjects(unittest.TestCase):

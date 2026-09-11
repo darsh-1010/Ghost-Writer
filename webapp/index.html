@@ -165,7 +165,7 @@
   .search-wrap svg { position: absolute; left: 14px; top: 50%; transform: translateY(-50%); width: 16px; height: 16px; color: var(--text-faint); }
   .search-wrap input { padding-left: 38px; border-radius: 14px; padding-top: 12px; padding-bottom: 12px; }
 
-  .provider-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-bottom: 18px; }
+  .provider-grid { display: grid; grid-template-columns: repeat(5, 1fr); gap: 8px; margin-bottom: 18px; }
   .provider-opt {
     border: 1px solid var(--border); background: var(--bg-card); border-radius: 12px;
     padding: 11px 8px; text-align: center; cursor: pointer; font-size: 12px; font-weight: 600; color: var(--text-dim);
@@ -383,6 +383,7 @@
             <div class="provider-opt" data-provider="openai">OpenAI<br>(ChatGPT)</div>
             <div class="provider-opt" data-provider="gemini">Google<br>(Gemini)</div>
             <div class="provider-opt" data-provider="ollama">Ollama<br>(local/open-source)</div>
+            <div class="provider-opt" data-provider="openrouter">OpenRouter<br>(open-weight)</div>
           </div>
 
           <div class="field" id="field-key">
@@ -393,7 +394,12 @@
           <div class="field" id="field-host" hidden>
             <label for="ollama-host">Ollama host</label>
             <input type="text" id="ollama-host" value="http://localhost:11434">
-            <div class="hint">Make sure <code>ollama serve</code> is running locally. No key needed. No native web-search tool, so suggestions won't have a Web source line (see README).</div>
+            <div class="hint">Make sure <code>ollama serve</code> is running locally. No key needed to run the model itself — see below for web search.</div>
+          </div>
+          <div class="field" id="field-ollama-search" hidden>
+            <label for="ollama-search-key">Ollama search key (optional)</label>
+            <input type="password" id="ollama-search-key" placeholder="leave blank to skip web search">
+            <div class="hint">Free key from <code>ollama.com/settings/keys</code> — enables real Web source citations by letting the local model call Ollama's hosted search. Without it, synthesis still runs, just without sources.</div>
           </div>
 
           <div class="row">
@@ -458,6 +464,7 @@ const PROVIDER_DEFAULTS = {
   openai: { model: "gpt-4o", fast_model: "gpt-4o-mini", keyPlaceholder: "sk-...", hint: "platform.openai.com — synthesis uses OpenAI's web_search tool (Responses API) for sourced suggestions" },
   gemini: { model: "gemini-2.0-flash", fast_model: "gemini-2.0-flash", keyPlaceholder: "AIza...", hint: "aistudio.google.com — synthesis uses Google Search grounding for sourced suggestions" },
   ollama: { model: "llama3.1", fast_model: "llama3.1" },
+  openrouter: { model: "deepseek/deepseek-chat", fast_model: "deepseek/deepseek-chat", keyPlaceholder: "sk-or-...", hint: "openrouter.ai/keys — one key for GLM, DeepSeek, Qwen, Kimi K2 and more; synthesis appends :online for sourced suggestions" },
 };
 
 let state = { provider: "anthropic", jobId: null, projectPath: null, pollTimer: null, projects: [] };
@@ -534,9 +541,9 @@ function applyProviderDefaults() {
   $("model").value = d.model;
   $("fast-model").value = d.fast_model;
   if (state.provider === "ollama") {
-    hide("field-key"); show("field-host"); hide("remember-row");
+    hide("field-key"); show("field-host"); show("field-ollama-search"); show("remember-row");
   } else {
-    show("field-key"); hide("field-host"); show("remember-row");
+    show("field-key"); hide("field-host"); hide("field-ollama-search"); show("remember-row");
     $("api-key").placeholder = d.keyPlaceholder;
     $("key-hint").textContent = `Get a key at ${d.hint}`;
   }
@@ -550,11 +557,12 @@ $("continue-btn").addEventListener("click", async () => {
     model: $("model").value.trim(),
     fast_model: $("fast-model").value.trim(),
   };
+  body.remember = $("remember").checked;
   if (state.provider === "ollama") {
     body.ollama_host = $("ollama-host").value.trim();
+    body.ollama_search_api_key = $("ollama-search-key").value;
   } else {
     body.api_key = $("api-key").value;
-    body.remember = $("remember").checked;
   }
   try {
     await api("POST", "/api/session", body);

@@ -45,7 +45,10 @@ STATE: dict = {
 JOBS_LOCK = threading.Lock()
 JOBS: dict[str, dict] = {}
 
-KEY_ENV_VAR = {"anthropic": "ANTHROPIC_API_KEY", "openai": "OPENAI_API_KEY", "gemini": "GEMINI_API_KEY"}
+KEY_ENV_VAR = {
+    "anthropic": "ANTHROPIC_API_KEY", "openai": "OPENAI_API_KEY", "gemini": "GEMINI_API_KEY",
+    "openrouter": "OPENROUTER_API_KEY",
+}
 
 
 def _run_scan_job(
@@ -251,7 +254,7 @@ class Handler(BaseHTTPRequestHandler):
     def _handle_session(self):
         body = self._read_json()
         provider = body.get("provider", "anthropic")
-        if provider not in ("anthropic", "openai", "gemini", "ollama"):
+        if provider not in ("anthropic", "openai", "gemini", "ollama", "openrouter"):
             return self._error(400, f"unknown provider: {provider}")
 
         with STATE_LOCK:
@@ -268,6 +271,15 @@ class Handler(BaseHTTPRequestHandler):
                 os.environ[KEY_ENV_VAR[provider]] = api_key
                 if body.get("remember"):
                     sr.save_env_var(KEY_ENV_VAR[provider], api_key)
+            # Ollama's own key is separate and optional — it's not needed to talk to
+            # your local server, only to enable synthesis web search via ollama.com's
+            # hosted search API (see _ollama_search_complete). Free key, so no
+            # provider-is-ollama gate on requiring it like the others above.
+            search_key = (body.get("ollama_search_api_key") or "").strip()
+            if provider == "ollama" and search_key:
+                os.environ["OLLAMA_API_KEY"] = search_key
+                if body.get("remember"):
+                    sr.save_env_var("OLLAMA_API_KEY", search_key)
 
         self._send_json({"ok": True, "provider": provider})
 

@@ -636,6 +636,28 @@ def _ollama_num_ctx(prompt: str, max_tokens: int) -> int:
     return max(_OLLAMA_MIN_NUM_CTX, min(_OLLAMA_MAX_NUM_CTX, estimated_prompt_tokens + max_tokens + 512))
 
 
+def _openrouter_complete(model: str, prompt: str, max_tokens: int) -> tuple[str, int, int]:
+    """OpenRouter is OpenAI-compatible (same /chat/completions shape), so it's a thin
+    wrapper around _openai_style_complete with a different base URL — the practical way
+    to point this tool at the current best open-weight coding models (GLM, DeepSeek,
+    Qwen, Kimi K2, ...) without hosting them yourself. See README for the tradeoffs vs
+    Anthropic/Ollama."""
+    api_key = os.environ.get("OPENROUTER_API_KEY")
+    if not api_key:
+        raise RuntimeError("OPENROUTER_API_KEY is not set (checked environment and .env) but an OpenRouter model was requested")
+    return _openai_style_complete(model, prompt, max_tokens, "https://openrouter.ai/api/v1/chat/completions", api_key)
+
+
+def _openrouter_search_complete(model: str, prompt: str, max_tokens: int) -> tuple[str, int, int]:
+    """OpenRouter's web-search plugin is enabled per-request by appending ':online' to
+    the model slug — no separate endpoint, no client-side tool loop needed, unlike
+    Ollama's search below. Used by synthesize() only; extraction doesn't need search."""
+    api_key = os.environ.get("OPENROUTER_API_KEY")
+    if not api_key:
+        raise RuntimeError("OPENROUTER_API_KEY is not set (checked environment and .env) but an OpenRouter model was requested")
+    return _openai_style_complete(f"{model}:online", prompt, max_tokens, "https://openrouter.ai/api/v1/chat/completions", api_key)
+
+
 def _ollama_complete(model: str, prompt: str, max_tokens: int) -> tuple[str, int, int]:
     host = (os.environ.get("OLLAMA_HOST") or "http://localhost:11434").rstrip("/")
     num_ctx = _ollama_num_ctx(prompt, max_tokens)
@@ -645,6 +667,90 @@ def _ollama_complete(model: str, prompt: str, max_tokens: int) -> tuple[str, int
         model, prompt, max_tokens, f"{host}/v1/chat/completions", "ollama",
         extra_body={"options": {"num_ctx": num_ctx}},
     )
+
+
+# Ollama has no built-in search of its own to call during generation — but ollama.com
+# (the company) runs a separate hosted search service any Ollama account can query,
+# and local models with tool support (llama3.1+) can emit an OpenAI-style tool_call
+# asking for one. So unlike Anthropic/OpenAI/Gemini above, where the provider runs the
+# whole search loop server-side, here WE run the loop: the local model decides when to
+# search, we make the actual HTTP call to ollama.com/api/web_search ourselves, and feed
+# the results back as a "tool" message. Opt-in via OLLAMA_API_KEY (a *different* key
+# from OLLAMA_HOST — that one just points at your local server, this one authenticates
+# to ollama.com's cloud). Get one free at https://ollama.com/settings/keys.
+_OLLAMA_SEARCH_TOOL = [{
+    "type": "function",
+    "function": {
+        "name": "web_search",
+        "description": "Search the web for a credible best-practice source backing up one suggestion.",
+        "parameters": {
+            "type": "object",
+            "properties": {"query": {"type": "string", "description": "the search query"}},
+            "required": ["query"],
+        },
+    },
+}]
+
+
+def _ollama_web_search(query: str, api_key: str, max_results: int = 5) -> list[dict]:
+    body = json.dumps({"query": query, "max_results": max_results}).encode("utf-8")
+    req = urllib.request.Request(
+        "https://ollama.com/api/web_search", data=body,
+        headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+        method="POST",
+    )
+    with urllib.request.urlopen(req, timeout=30) as resp:
+        data = json.loads(resp.read())
+    return data.get("results", [])
+
+
+def _ollama_search_complete(
+    model: str, prompt: str, max_tokens: int, search_api_key: str, max_uses: int = 5,
+) -> tuple[str, int, int]:
+    host = (os.environ.get("OLLAMA_HOST") or "http://localhost:11434").rstrip("/")
+    num_ctx = _ollama_num_ctx(prompt, max_tokens)
+    messages = [{"role": "user", "content": prompt}]
+    total_in = total_out = searches_used = 0
+
+    for turn in range(1, 7):  # ponytail: hard cap on tool-call turns, mirrors the Anthropic loop's cap
+        body = json.dumps({
+            "model": model, "messages": messages, "max_tokens": max_tokens,
+            "tools": _OLLAMA_SEARCH_TOOL, "options": {"num_ctx": num_ctx},
+        }).encode("utf-8")
+        req = urllib.request.Request(
+            f"{host}/v1/chat/completions", data=body,
+            headers={"Authorization": "Bearer ollama", "Content-Type": "application/json"},
+            method="POST",
+        )
+        with urllib.request.urlopen(req, timeout=180) as resp:
+            data = json.loads(resp.read())
+        usage = data.get("usage") or {}
+        total_in += usage.get("prompt_tokens", 0)
+        total_out += usage.get("completion_tokens", 0)
+        message = data["choices"][0]["message"]
+        tool_calls = message.get("tool_calls") or []
+        log.info(
+            "ollama search turn %d: %d tool call(s) requested, %d/%d searches used so far",
+            turn, len(tool_calls), searches_used, max_uses,
+        )
+        if not tool_calls or searches_used >= max_uses:
+            return (message.get("content") or "").strip(), total_in, total_out
+
+        messages.append(message)
+        for call in tool_calls:
+            try:
+                args = json.loads(call.get("function", {}).get("arguments") or "{}")
+            except json.JSONDecodeError:
+                args = {}
+            results = _ollama_web_search(args.get("query", ""), search_api_key)
+            searches_used += 1
+            messages.append({
+                "role": "tool", "tool_call_id": call.get("id", ""),
+                "content": json.dumps(results)[:4000],  # keep the local model's small context sane
+            })
+
+    log.warning("ollama search synthesis hit the 6-turn tool-call cap; response may be incomplete")
+    return "", total_in, total_out
 
 
 def _gemini_complete(model: str, prompt: str, max_tokens: int, search: bool = False) -> tuple[str, int, int]:
@@ -715,6 +821,8 @@ def _complete(model: str, prompt: str, max_tokens: int, provider: str = "auto") 
         return _gemini_complete(model, prompt, max_tokens)
     if resolved == "ollama":
         return _ollama_complete(model, prompt, max_tokens)
+    if resolved == "openrouter":
+        return _openrouter_complete(model, prompt, max_tokens)
     client = anthropic.Anthropic()
     response = client.messages.create(model=model, max_tokens=max_tokens, messages=[{"role": "user", "content": prompt}])
     text = "".join(b.text for b in response.content if b.type == "text").strip()
@@ -852,9 +960,10 @@ def synthesize(prompt: str, model: str, max_uses: int = 10, provider: str = "aut
     """Expensive pass: clusters candidates across sessions, writes suggestions, web-searches for sources.
     Each provider's real web-search shape is different enough (Anthropic: multi-turn tool loop on the
     Messages API; OpenAI: single call but a *different endpoint*, /v1/responses; Gemini: single call,
-    same endpoint as everything else, one extra tools field) that this branches per-provider rather than
-    faking one unified interface — see CLAUDE.md on why litellm-style cross-provider equivalence was
-    rejected here. Ollama has no native web-search tool at all, so it stays search-free."""
+    same endpoint as everything else, one extra tools field; Ollama: no built-in search of its own, so
+    WE run the tool loop against ollama.com's hosted search; OpenRouter: single call, one suffix on the
+    model slug) that this branches per-provider rather than faking one unified interface — see CLAUDE.md
+    on why litellm-style cross-provider equivalence was rejected here."""
     resolved = resolve_provider(provider, model)
 
     if resolved == "openai":
@@ -867,10 +976,20 @@ def synthesize(prompt: str, model: str, max_uses: int = 10, provider: str = "aut
         log.info("synthesis done (%s, gemini google_search grounding): input_tokens=%d, output_tokens=%d", model, in_tok, out_tok)
         return text
 
+    if resolved == "openrouter":
+        text, in_tok, out_tok = _openrouter_search_complete(model, prompt, max_tokens=8000)
+        log.info("synthesis done (%s, openrouter :online web search): input_tokens=%d, output_tokens=%d", model, in_tok, out_tok)
+        return text
+
     if resolved == "ollama":
+        search_key = os.environ.get("OLLAMA_API_KEY")
+        if search_key:
+            text, in_tok, out_tok = _ollama_search_complete(model, prompt, max_tokens=8000, search_api_key=search_key, max_uses=max_uses)
+            log.info("synthesis done (%s, ollama web_search): input_tokens=%d, output_tokens=%d", model, in_tok, out_tok)
+            return text
         log.warning(
-            "ollama has no native web-search tool — synthesis will run without one, "
-            "so suggestions won't have a **Web source** line. See README.",
+            "ollama has no web search without OLLAMA_API_KEY (free at https://ollama.com/settings/keys) — "
+            "synthesis will run without one, so suggestions won't have a **Web source** line. See README.",
         )
         text, in_tok, out_tok = _complete(model, prompt, max_tokens=8000, provider=provider)
         log.info("synthesis done (%s, no web search): input_tokens=%d, output_tokens=%d", model, in_tok, out_tok)
@@ -1285,9 +1404,9 @@ def parse_args(argv: list[str]) -> Args:
                    help=f"Synthesis model — clusters candidates, writes suggestions, web-searches (default {DEFAULT_MODEL})")
     p.add_argument("--fast-model", default=DEFAULT_FAST_MODEL,
                    help=f"Extraction model — reads raw transcripts, one call per session (default {DEFAULT_FAST_MODEL})")
-    p.add_argument("--provider", default="auto", choices=["auto", "anthropic", "openai", "gemini", "ollama"],
+    p.add_argument("--provider", default="auto", choices=["auto", "anthropic", "openai", "gemini", "ollama", "openrouter"],
                    help="Force a provider for both --model/--fast-model instead of guessing from the model name "
-                        "(default auto — required for ollama, whose model names have no distinguishing prefix)")
+                        "(default auto — required for ollama/openrouter, whose model names have no distinguishing prefix)")
     p.add_argument("--harnesses", default=DEFAULT_HARNESSES,
                    help=f"Comma-separated list to scan (default {DEFAULT_HARNESSES}). "
                         f"Also accepts cursor/opencode/hermes/grok/pi/antigravity-ide to report detection without parsing.")
@@ -1326,7 +1445,10 @@ def main(argv: list[str] | None = None) -> int:
     fast_provider = resolve_provider(args.provider, args.fast_model)
     synth_provider = resolve_provider(args.provider, args.model)
     needed = {fast_provider, synth_provider}
-    key_env = {"anthropic": "ANTHROPIC_API_KEY", "openai": "OPENAI_API_KEY", "gemini": "GEMINI_API_KEY"}
+    key_env = {
+        "anthropic": "ANTHROPIC_API_KEY", "openai": "OPENAI_API_KEY", "gemini": "GEMINI_API_KEY",
+        "openrouter": "OPENROUTER_API_KEY",
+    }
     for provider, env_var in key_env.items():
         if provider in needed and not os.environ.get(env_var):
             log.error("--model/--fast-model/--provider requested %s but %s is not set (checked environment and .env).", provider, env_var)

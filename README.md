@@ -48,17 +48,24 @@ them across sessions and writes suggestions — cutting what the expensive
 model reads by ~50% with no loss in accuracy. Every quote gets tagged
 `✓ verified` or flagged if it isn't found verbatim in your real transcript.
 
-Supports Anthropic, OpenAI, Gemini, and local Ollama models (`--provider`).
-Synthesis is web-search-backed on all three cloud providers — each with its
-own real search mechanism, not a faked common interface: Anthropic's
-`web_search` tool (multi-turn), OpenAI's `web_search` tool on the Responses
-API, and Gemini's Google Search grounding. Ollama has no native web-search
-tool at all, so its suggestions never get a **Web source** line; its
-extraction/synthesis prompt window is also auto-sized to fit (`OLLAMA_NUM_CTX`
-to override) since Ollama's default context is small enough to silently
-truncate a real transcript otherwise. A small local model's hit rate on the
-security-pattern pass in particular will also be lower than Claude's — it's
-a more specialized judgment call than spotting workflow friction.
+Supports Anthropic, OpenAI, Gemini, local Ollama, and OpenRouter models
+(`--provider`). Synthesis is web-search-backed on every one of them — each
+with its own real search mechanism, not a faked common interface:
+Anthropic's `web_search` tool (multi-turn), OpenAI's `web_search` tool on
+the Responses API, Gemini's Google Search grounding, OpenRouter's `:online`
+model-slug suffix, and Ollama's own hosted search
+(`ollama.com/api/web_search`) — opt-in via a free `OLLAMA_API_KEY`
+(separate from `OLLAMA_HOST`, which just points at your local server);
+without it Ollama synthesis still runs, just without a **Web source** line.
+Ollama's extraction/synthesis prompt window is also auto-sized to fit
+(`OLLAMA_NUM_CTX` to override) since Ollama's default context is small
+enough to silently truncate a real transcript otherwise. A small local
+model's hit rate on the security-pattern pass in particular will also be
+lower than Claude's — it's a more specialized judgment call than spotting
+workflow friction. OpenRouter is the practical way to point this at the
+current best open-weight coding models (GLM, DeepSeek, Qwen, Kimi K2, ...)
+without self-hosting a multi-GPU cluster — one `OPENROUTER_API_KEY`, model
+names like `deepseek/deepseek-chat` or `z-ai/glm-4.6`.
 Full breakdown of what's supported, the safety guardrails, and every flag →
 **[features.md](features.md)**.
 
