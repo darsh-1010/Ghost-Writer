@@ -3,6 +3,7 @@ import json
 import os
 import tempfile
 import unittest
+import unittest.mock
 from pathlib import Path
 
 import session_reviewer as sr
@@ -254,6 +255,154 @@ class TestGeminiComplete(unittest.TestCase):
         os.environ.pop("GOOGLE_API_KEY", None)
         with self.assertRaises(RuntimeError):
             sr._gemini_complete("gemini-2.0-flash", "hi", max_tokens=10)
+
+    def test_search_true_adds_google_search_tool(self):
+        captured = {}
+
+        class FakeResponse:
+            def read(self):
+                return json.dumps({
+                    "candidates": [{"content": {"parts": [{"text": "grounded answer"}]}}],
+                    "usageMetadata": {"promptTokenCount": 1, "candidatesTokenCount": 1},
+                }).encode()
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+        def fake_urlopen(req, timeout=None):
+            captured["body"] = json.loads(req.data)
+            return FakeResponse()
+
+        os.environ["GEMINI_API_KEY"] = "test-key"
+        try:
+            import urllib.request as ur
+            real_urlopen = ur.urlopen
+            ur.urlopen = fake_urlopen
+            try:
+                sr._gemini_complete("gemini-2.0-flash", "hi", max_tokens=50, search=True)
+            finally:
+                ur.urlopen = real_urlopen
+        finally:
+            del os.environ["GEMINI_API_KEY"]
+
+        self.assertEqual(captured["body"]["tools"], [{"google_search": {}}])
+
+    def test_search_false_by_default_omits_tools(self):
+        captured = {}
+
+        class FakeResponse:
+            def read(self):
+                return json.dumps({
+                    "candidates": [{"content": {"parts": [{"text": "plain answer"}]}}],
+                    "usageMetadata": {},
+                }).encode()
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+        def fake_urlopen(req, timeout=None):
+            captured["body"] = json.loads(req.data)
+            return FakeResponse()
+
+        os.environ["GEMINI_API_KEY"] = "test-key"
+        try:
+            import urllib.request as ur
+            real_urlopen = ur.urlopen
+            ur.urlopen = fake_urlopen
+            try:
+                sr._gemini_complete("gemini-2.0-flash", "hi", max_tokens=50)
+            finally:
+                ur.urlopen = real_urlopen
+        finally:
+            del os.environ["GEMINI_API_KEY"]
+
+        self.assertNotIn("tools", captured["body"])
+
+
+class TestOpenAISearchComplete(unittest.TestCase):
+    def test_calls_responses_api_with_web_search_tool(self):
+        captured = {}
+
+        class FakeResponse:
+            def read(self):
+                return json.dumps({
+                    "output": [
+                        {"type": "web_search_call", "id": "ws_1", "status": "completed"},
+                        {"type": "message", "role": "assistant", "content": [
+                            {"type": "output_text", "text": "according to real sources, X"},
+                        ]},
+                    ],
+                    "usage": {"input_tokens": 42, "output_tokens": 17},
+                }).encode()
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+        def fake_urlopen(req, timeout=None):
+            captured["url"] = req.full_url
+            captured["body"] = json.loads(req.data)
+            return FakeResponse()
+
+        os.environ["OPENAI_API_KEY"] = "sk-test"
+        try:
+            import urllib.request as ur
+            real_urlopen = ur.urlopen
+            ur.urlopen = fake_urlopen
+            try:
+                text, in_tok, out_tok = sr._openai_search_complete("gpt-4.1", "find sources", max_tokens=8000)
+            finally:
+                ur.urlopen = real_urlopen
+        finally:
+            del os.environ["OPENAI_API_KEY"]
+
+        self.assertEqual(text, "according to real sources, X")
+        self.assertEqual((in_tok, out_tok), (42, 17))
+        self.assertEqual(captured["url"], "https://api.openai.com/v1/responses")
+        self.assertEqual(captured["body"]["tools"], [{"type": "web_search"}])
+        self.assertEqual(captured["body"]["input"], "find sources")
+
+    def test_raises_clearly_without_api_key(self):
+        os.environ.pop("OPENAI_API_KEY", None)
+        with self.assertRaises(RuntimeError):
+            sr._openai_search_complete("gpt-4.1", "hi", max_tokens=10)
+
+
+class TestSynthesizeProviderDispatch(unittest.TestCase):
+    """synthesize() must route each provider to its own real web-search shape,
+    not silently fall through to the no-search path."""
+
+    def test_openai_routes_to_responses_api_search(self):
+        calls = []
+        with unittest.mock.patch.object(sr, "_openai_search_complete", lambda *a, **k: (calls.append(a) or ("ok", 1, 1))):
+            result = sr.synthesize("prompt", "gpt-4.1", provider="openai")
+        self.assertEqual(result, "ok")
+        self.assertEqual(len(calls), 1)
+
+    def test_gemini_routes_to_grounded_search(self):
+        calls = []
+
+        def fake_gemini(model, prompt, max_tokens, search=False):
+            calls.append(search)
+            return "ok", 1, 1
+
+        with unittest.mock.patch.object(sr, "_gemini_complete", fake_gemini):
+            result = sr.synthesize("prompt", "gemini-2.0-flash", provider="gemini")
+        self.assertEqual(result, "ok")
+        self.assertEqual(calls, [True])
+
+    def test_ollama_stays_search_free(self):
+        with unittest.mock.patch.object(sr, "_complete", lambda *a, **k: ("ok", 1, 1)):
+            result = sr.synthesize("prompt", "llama3.1", provider="ollama")
+        self.assertEqual(result, "ok")
 
 
 class TestDiscoverProjects(unittest.TestCase):

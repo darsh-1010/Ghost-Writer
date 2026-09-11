@@ -49,9 +49,13 @@ model reads by ~50% with no loss in accuracy. Every quote gets tagged
 `✓ verified` or flagged if it isn't found verbatim in your real transcript.
 
 Supports Anthropic, OpenAI, Gemini, and local Ollama models (`--provider`).
-Ollama runs get no web-search-backed suggestions (Anthropic-only), and the
-extraction/synthesis prompt window is auto-sized to fit (`OLLAMA_NUM_CTX` to
-override) since Ollama's default context is small enough to silently
+Synthesis is web-search-backed on all three cloud providers — each with its
+own real search mechanism, not a faked common interface: Anthropic's
+`web_search` tool (multi-turn), OpenAI's `web_search` tool on the Responses
+API, and Gemini's Google Search grounding. Ollama has no native web-search
+tool at all, so its suggestions never get a **Web source** line; its
+extraction/synthesis prompt window is also auto-sized to fit (`OLLAMA_NUM_CTX`
+to override) since Ollama's default context is small enough to silently
 truncate a real transcript otherwise. A small local model's hit rate on the
 security-pattern pass in particular will also be lower than Claude's — it's
 a more specialized judgment call than spotting workflow friction.

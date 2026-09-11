@@ -647,25 +647,61 @@ def _ollama_complete(model: str, prompt: str, max_tokens: int) -> tuple[str, int
     )
 
 
-def _gemini_complete(model: str, prompt: str, max_tokens: int) -> tuple[str, int, int]:
+def _gemini_complete(model: str, prompt: str, max_tokens: int, search: bool = False) -> tuple[str, int, int]:
+    """search=True turns on Gemini's native "Grounding with Google Search" — same
+    generateContent endpoint, just one extra tools entry. Used by synthesize()."""
     api_key = os.environ.get("GEMINI_API_KEY") or os.environ.get("GOOGLE_API_KEY")
     if not api_key:
         raise RuntimeError("GEMINI_API_KEY is not set (checked environment and .env) but a Gemini model was requested")
-    body = json.dumps({
+    body = {
         "contents": [{"role": "user", "parts": [{"text": prompt}]}],
         "generationConfig": {"maxOutputTokens": max_tokens},
-    }).encode("utf-8")
+    }
+    if search:
+        body["tools"] = [{"google_search": {}}]
     url = f"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent"
     req = urllib.request.Request(
-        url, data=body,
+        url, data=json.dumps(body).encode("utf-8"),
         headers={"x-goog-api-key": api_key, "Content-Type": "application/json"},
         method="POST",
     )
-    with urllib.request.urlopen(req, timeout=120) as resp:
+    with urllib.request.urlopen(req, timeout=180 if search else 120) as resp:
         data = json.loads(resp.read())
     text = "".join(p.get("text", "") for p in data["candidates"][0]["content"]["parts"]).strip()
     usage = data.get("usageMetadata") or {}
     return text, usage.get("promptTokenCount", 0), usage.get("candidatesTokenCount", 0)
+
+
+def _openai_search_complete(model: str, prompt: str, max_tokens: int) -> tuple[str, int, int]:
+    """OpenAI's native web_search tool only exists on the Responses API
+    (/v1/responses), a different endpoint and request/response shape from Chat
+    Completions — not OpenAI-compatible the way Ollama's endpoint is, so this
+    can't reuse _openai_style_complete(). Used by synthesize() only; extraction
+    (extract_candidates/revise_suggestion) has no need for search and keeps
+    using the cheaper, simpler Chat Completions path via _openai_complete()."""
+    api_key = os.environ.get("OPENAI_API_KEY")
+    if not api_key:
+        raise RuntimeError("OPENAI_API_KEY is not set (checked environment and .env) but an OpenAI model was requested")
+    body = json.dumps({
+        "model": model,
+        "input": prompt,
+        "tools": [{"type": "web_search"}],
+        "max_output_tokens": max_tokens,
+    }).encode("utf-8")
+    req = urllib.request.Request(
+        "https://api.openai.com/v1/responses", data=body,
+        headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
+        method="POST",
+    )
+    with urllib.request.urlopen(req, timeout=180) as resp:
+        data = json.loads(resp.read())
+    text = "".join(
+        part.get("text", "")
+        for item in data.get("output", []) if item.get("type") == "message"
+        for part in item.get("content", []) if part.get("type") == "output_text"
+    ).strip()
+    usage = data.get("usage") or {}
+    return text, usage.get("input_tokens", 0), usage.get("output_tokens", 0)
 
 
 def _complete(model: str, prompt: str, max_tokens: int, provider: str = "auto") -> tuple[str, int, int]:
@@ -813,11 +849,28 @@ def build_synthesis_prompt(candidates: dict[str, str], n: int, prompt_template: 
 
 
 def synthesize(prompt: str, model: str, max_uses: int = 10, provider: str = "auto") -> str:
-    """Expensive pass: clusters candidates across sessions, writes suggestions, web-searches for sources."""
-    if resolve_provider(provider, model) != "anthropic":
+    """Expensive pass: clusters candidates across sessions, writes suggestions, web-searches for sources.
+    Each provider's real web-search shape is different enough (Anthropic: multi-turn tool loop on the
+    Messages API; OpenAI: single call but a *different endpoint*, /v1/responses; Gemini: single call,
+    same endpoint as everything else, one extra tools field) that this branches per-provider rather than
+    faking one unified interface — see CLAUDE.md on why litellm-style cross-provider equivalence was
+    rejected here. Ollama has no native web-search tool at all, so it stays search-free."""
+    resolved = resolve_provider(provider, model)
+
+    if resolved == "openai":
+        text, in_tok, out_tok = _openai_search_complete(model, prompt, max_tokens=8000)
+        log.info("synthesis done (%s, openai web_search): input_tokens=%d, output_tokens=%d", model, in_tok, out_tok)
+        return text
+
+    if resolved == "gemini":
+        text, in_tok, out_tok = _gemini_complete(model, prompt, max_tokens=8000, search=True)
+        log.info("synthesis done (%s, gemini google_search grounding): input_tokens=%d, output_tokens=%d", model, in_tok, out_tok)
+        return text
+
+    if resolved == "ollama":
         log.warning(
-            "model %s has no web-search tool wired up here — synthesis will run without it, "
-            "so suggestions won't have a **Web source** line. See README.", model,
+            "ollama has no native web-search tool — synthesis will run without one, "
+            "so suggestions won't have a **Web source** line. See README.",
         )
         text, in_tok, out_tok = _complete(model, prompt, max_tokens=8000, provider=provider)
         log.info("synthesis done (%s, no web search): input_tokens=%d, output_tokens=%d", model, in_tok, out_tok)

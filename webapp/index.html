@@ -393,7 +393,7 @@
           <div class="field" id="field-host" hidden>
             <label for="ollama-host">Ollama host</label>
             <input type="text" id="ollama-host" value="http://localhost:11434">
-            <div class="hint">Make sure <code>ollama serve</code> is running locally. No key needed.</div>
+            <div class="hint">Make sure <code>ollama serve</code> is running locally. No key needed. No native web-search tool, so suggestions won't have a Web source line (see README).</div>
           </div>
 
           <div class="row">
@@ -455,8 +455,8 @@
 <script>
 const PROVIDER_DEFAULTS = {
   anthropic: { model: "claude-sonnet-5", fast_model: "claude-haiku-4-5-20251001", keyPlaceholder: "sk-ant-...", hint: "console.anthropic.com" },
-  openai: { model: "gpt-4o", fast_model: "gpt-4o-mini", keyPlaceholder: "sk-...", hint: "platform.openai.com — no web-search-backed suggestions with this provider (see README)" },
-  gemini: { model: "gemini-2.0-flash", fast_model: "gemini-2.0-flash", keyPlaceholder: "AIza...", hint: "aistudio.google.com — no web-search-backed suggestions with this provider (see README)" },
+  openai: { model: "gpt-4o", fast_model: "gpt-4o-mini", keyPlaceholder: "sk-...", hint: "platform.openai.com — synthesis uses OpenAI's web_search tool (Responses API) for sourced suggestions" },
+  gemini: { model: "gemini-2.0-flash", fast_model: "gemini-2.0-flash", keyPlaceholder: "AIza...", hint: "aistudio.google.com — synthesis uses Google Search grounding for sourced suggestions" },
   ollama: { model: "llama3.1", fast_model: "llama3.1" },
 };
 
