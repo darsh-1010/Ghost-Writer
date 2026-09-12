@@ -472,6 +472,46 @@ class TestExtractCandidatesParallel(unittest.TestCase):
             with self.assertRaises(RuntimeError):
                 sr.extract_candidates_parallel({"a.jsonl": "t"}, "model")
 
+    def test_cancel_check_raises_scan_cancelled(self):
+        with unittest.mock.patch.object(sr, "extract_candidates", lambda *a, **k: "ok"):
+            with self.assertRaises(sr.ScanCancelled):
+                sr.extract_candidates_parallel({"a.jsonl": "t", "b.jsonl": "t"}, "model", cancel_check=lambda: True)
+
+    def test_cancel_fires_promptly_even_while_a_call_is_still_hanging(self):
+        """The bug this guards against: cancel used to only be checked BETWEEN
+        results, so a hung first call (the realistic "wrong provider/key" case)
+        would block cancellation until it timed out on its own. Now it's polled
+        every 0.5s while waiting, so it should fire in ~1s, not wait out the hang.
+        Uses an Event instead of a bare sleep so the background worker thread (which
+        can't be force-killed once cancelled, only left to finish quietly) doesn't
+        keep the test process alive for the hang's full duration."""
+        import threading as threading_mod
+        import time as time_mod
+
+        release = threading_mod.Event()
+
+        def hangs_until_released(text, model, provider, prompt_template):
+            release.wait(timeout=30)
+            return "unreachable"
+
+        cancel_after = time_mod.monotonic() + 0.7
+        t0 = time_mod.monotonic()
+        try:
+            with unittest.mock.patch.object(sr, "extract_candidates", hangs_until_released):
+                with self.assertRaises(sr.ScanCancelled):
+                    sr.extract_candidates_parallel(
+                        {"a.jsonl": "t"}, "model", cancel_check=lambda: time_mod.monotonic() > cancel_after,
+                    )
+            self.assertLess(time_mod.monotonic() - t0, 5)  # nowhere near the 30s hang
+        finally:
+            release.set()  # let the leaked background thread exit now instead of at the 30s timeout
+
+    def test_no_cancel_check_ignores_nothing(self):
+        """Default (no cancel_check) behaves exactly as before this feature — never raises ScanCancelled."""
+        with unittest.mock.patch.object(sr, "extract_candidates", lambda *a, **k: "ok"):
+            results = sr.extract_candidates_parallel({"a.jsonl": "t"}, "model")
+        self.assertEqual(results, {"a.jsonl": "ok"})
+
 
 class TestOllamaWebSearch(unittest.TestCase):
     """Ollama's local model has no search of its own — it emits a tool_call and WE

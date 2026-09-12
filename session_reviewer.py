@@ -17,8 +17,9 @@ import sys
 import time
 import urllib.error
 import urllib.request
-from concurrent.futures import ThreadPoolExecutor
+from concurrent.futures import FIRST_COMPLETED, ThreadPoolExecutor, wait as futures_wait
 from dataclasses import dataclass
+from typing import Callable
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -964,22 +965,46 @@ MAX_CONCURRENT_EXTRACTIONS = int(os.environ.get("MAX_CONCURRENT_EXTRACTIONS", "5
 # machine running `ollama serve`, or these just queue there with no speedup.
 
 
+class ScanCancelled(Exception):
+    """Raised (only when a cancel_check is passed in) to unwind a scan the app's user
+    asked to stop — e.g. they picked the wrong provider/key and don't want to wait out
+    a hung or misconfigured run. Cooperative: it can't abort a request already in
+    flight, but it stops queueing further work at the next checkpoint."""
+
+
 def extract_candidates_parallel(
     sessions: dict[str, str], model: str, provider: str = "auto", prompt_template: str = EXTRACT_PROMPT,
+    cancel_check: Callable[[], bool] | None = None,
 ) -> dict[str, str]:
     """Runs extract_candidates() for every session at once instead of one at a time.
     Preserves `sessions`' original order in the result (not completion order) so
     downstream output — and which "most recent first" position each session shows up
-    in for the model — doesn't depend on which network call happened to finish first."""
+    in for the model — doesn't depend on which network call happened to finish first.
+    cancel_check, if given, is polled every 0.5s while waiting — not just between
+    results — so it fires promptly even if the very first call hangs (the common
+    "wrong provider/key" case this exists for), not only once that call eventually
+    times out on its own. Cancelling shuts down pending (not-yet-started) work and
+    raises ScanCancelled; used by the app to implement its "stop this scan" button.
+    Deliberately not a `with ThreadPoolExecutor(...)` block: that would call
+    shutdown(wait=True) on the way out, blocking cancellation on any call that's
+    still actually in flight — the exact case this exists to not wait around for."""
     if not sessions:
         return {}
     t0 = time.monotonic()
-    with ThreadPoolExecutor(max_workers=min(MAX_CONCURRENT_EXTRACTIONS, len(sessions))) as pool:
-        futures = {
-            name: pool.submit(extract_candidates, text, model, provider, prompt_template)
-            for name, text in sessions.items()
-        }
-        results = {name: future.result() for name, future in futures.items()}  # re-raises on failure, same as before
+    pool = ThreadPoolExecutor(max_workers=min(MAX_CONCURRENT_EXTRACTIONS, len(sessions)))
+    try:
+        futures = {pool.submit(extract_candidates, text, model, provider, prompt_template): name for name, text in sessions.items()}
+        pending = set(futures)
+        done_results: dict[str, str] = {}
+        while pending:
+            if cancel_check and cancel_check():
+                raise ScanCancelled("cancelled during extraction")
+            finished, pending = futures_wait(pending, timeout=0.5, return_when=FIRST_COMPLETED)
+            for future in finished:
+                done_results[futures[future]] = future.result()  # re-raises on failure, same as before
+    finally:
+        pool.shutdown(wait=False, cancel_futures=True)  # never blocks — leaves any still-running call to finish quietly in the background
+    results = {name: done_results[name] for name in sessions}  # restore original order
     log.info(
         "extracted from %d session(s) in %.1fs (up to %d concurrent call%s)",
         len(sessions), time.monotonic() - t0, min(MAX_CONCURRENT_EXTRACTIONS, len(sessions)),

@@ -55,6 +55,10 @@ def _run_scan_job(
     job_id: str, project_path: Path, sessions_n: int, provider: str, model: str, fast_model: str, security: bool = False,
 ) -> None:
     job = JOBS[job_id]
+
+    def cancelled() -> bool:
+        return job.get("cancelled", False)
+
     try:
         job["status"] = "scanning"
         all_matches = sr.find_all_sessions(project_path, ["claude-code", "codex", "antigravity"])
@@ -62,13 +66,17 @@ def _run_scan_job(
             job["status"] = "error"
             job["error"] = "No sessions found for this project."
             return
+        if cancelled():
+            raise sr.ScanCancelled("cancelled after scanning")
 
         chosen = all_matches[:sessions_n]
         sessions = {ref.name: sr.trim_session(ref) for ref in chosen}
 
         job["status"] = "extracting"
-        candidates = sr.extract_candidates_parallel(sessions, fast_model, provider)
+        candidates = sr.extract_candidates_parallel(sessions, fast_model, provider, cancel_check=cancelled)
         prompt = sr.build_synthesis_prompt(candidates, len(chosen))
+        if cancelled():
+            raise sr.ScanCancelled("cancelled before synthesis")
 
         job["status"] = "synthesizing"
         raw_report = sr.synthesize(prompt, model, provider=provider)
@@ -76,10 +84,12 @@ def _run_scan_job(
         report = sr.verify_quotes(raw_report, sessions)
         parsed = sr.parse_suggestions(report)
 
-        if security:
+        if security and not cancelled():
             job["status"] = "extracting_security"
-            sec_candidates = sr.extract_candidates_parallel(sessions, fast_model, provider, sr.SECURITY_EXTRACT_PROMPT)
+            sec_candidates = sr.extract_candidates_parallel(sessions, fast_model, provider, sr.SECURITY_EXTRACT_PROMPT, cancel_check=cancelled)
             sec_prompt = sr.build_synthesis_prompt(sec_candidates, len(chosen), sr.SECURITY_SYNTHESIS_PROMPT)
+            if cancelled():
+                raise sr.ScanCancelled("cancelled before security synthesis")
             job["status"] = "synthesizing_security"
             sec_raw_report = sr.synthesize(sec_prompt, model, provider=provider)
             sec_report = sr.verify_quotes(sec_raw_report, sessions)
@@ -127,6 +137,9 @@ def _run_scan_job(
             for i, s in enumerate(seen)
         ]
         job["status"] = "done"
+    except sr.ScanCancelled:
+        job["status"] = "cancelled"
+        log.info("scan job %s cancelled by user", job_id)
     except (anthropic.APIError, RuntimeError, KeyError) as e:
         log.exception("scan job %s failed", job_id)
         job["status"] = "error"
@@ -236,6 +249,8 @@ class Handler(BaseHTTPRequestHandler):
                 return self._handle_session()
             if path == "/api/scan":
                 return self._handle_scan()
+            if path == "/api/scan/cancel":
+                return self._handle_cancel_scan()
             if path == "/api/suggestion/decide":
                 return self._handle_decide()
             if path == "/api/suggestion/revise":
@@ -295,7 +310,7 @@ class Handler(BaseHTTPRequestHandler):
         job_id = uuid.uuid4().hex[:12]
         JOBS[job_id] = {
             "status": "queued", "project_path": project_path_str, "suggestions": [],
-            "header": None, "error": None, "effectiveness": [],
+            "header": None, "error": None, "effectiveness": [], "cancelled": False,
         }
         thread = threading.Thread(
             target=_run_scan_job,
@@ -305,6 +320,20 @@ class Handler(BaseHTTPRequestHandler):
         )
         thread.start()
         self._send_json({"job_id": job_id})
+
+    def _handle_cancel_scan(self):
+        """Cooperative stop for a running scan job — e.g. the user picked the wrong
+        provider/key and doesn't want to wait it out. Can't abort a request already in
+        flight, but the background thread checks this flag at the next checkpoint
+        (see _run_scan_job) and unwinds instead of starting further extraction/
+        synthesis work. Frees the user to reconfigure the provider and try again
+        immediately, without waiting on or restarting the whole app."""
+        body = self._read_json()
+        job = JOBS.get(body.get("job_id"))
+        if not job:
+            return self._error(404, "unknown job id")
+        job["cancelled"] = True
+        self._send_json({"ok": True})
 
     def _handle_decide(self):
         body = self._read_json()

@@ -82,12 +82,19 @@ Full breakdown of what's supported, the safety guardrails, and every flag →
 python app.py
 ```
 
-Three tabs in the sidebar — **Home** (pick a repo, scan, review suggestions
-as cards with **Approve / Reject / Comment & revise**), **Provider** (switch
-between Anthropic/OpenAI/Gemini/Ollama any time, not just on first run), and
+Sidebar tabs — **Home** (pick a repo, scan, review suggestions as cards with
+**Approve / Reject / Comment & revise**), **Provider** (switch between
+Anthropic/OpenAI/Gemini/Ollama/OpenRouter any time, not just on first run),
 **Analytics** (repos detected, repos actually worked up, suggestions
-approved/rejected/pending — all real numbers already on your machine, no
-separate tracking). Runs on `127.0.0.1` only. Details in [features.md](features.md).
+approved/rejected/pending, changes actually written — all real numbers
+already on your machine, no separate tracking), and **Effectiveness** (did a
+previously-accepted suggestion actually stick, or is the same mistake still
+showing up). A scan that's stuck or was started with the wrong
+provider/key can be stopped from its own screen — **Stop this scan** cancels
+it (cooperatively; it can't yank back a request already in flight, but it
+stops queueing further work at the next checkpoint), and **Change provider
+/ API key** does that and jumps straight to the Provider tab so you don't
+have to hunt for it. Runs on `127.0.0.1` only. Details in [features.md](features.md).
 
 ## Not another backpass
 

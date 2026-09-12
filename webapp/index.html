@@ -352,6 +352,10 @@
             <h2>Reviewing your sessions…</h2>
             <div class="progress-line"><span class="spinner"></span><span id="scan-status">queued</span></div>
             <div id="scan-error" class="error-banner" hidden></div>
+            <div style="display:flex;gap:8px;margin-top:14px;">
+              <button class="btn small bad" id="cancel-scan-btn">Stop this scan</button>
+              <button class="btn small" id="scanning-change-provider-btn">Change provider / API key</button>
+            </div>
           </div>
 
           <div id="screen-review" hidden>
@@ -648,6 +652,26 @@ $("scan-btn").addEventListener("click", async () => {
   }
 });
 
+// Stopping a running scan (e.g. wrong provider/key picked, or it's just hanging) —
+// cooperative on the server side: it can't yank back a request already in flight,
+// but it stops queueing further extraction/synthesis work at the next checkpoint.
+async function stopCurrentScan() {
+  clearTimeout(state.pollTimer);
+  if (state.jobId) {
+    try { await api("POST", "/api/scan/cancel", { job_id: state.jobId }); } catch (e) { /* job may already be done/gone */ }
+  }
+  state.jobId = null;
+  hide("screen-scanning"); hide("scan-error");
+  show("picker-card");
+}
+
+$("cancel-scan-btn").addEventListener("click", stopCurrentScan);
+
+$("scanning-change-provider-btn").addEventListener("click", async () => {
+  await stopCurrentScan();
+  switchTab("provider");
+});
+
 function pollJob() {
   clearTimeout(state.pollTimer);
   state.pollTimer = setTimeout(async () => {
@@ -665,6 +689,7 @@ function pollJob() {
         show("scan-error");
         return;
       }
+      if (job.status === "cancelled") return; // cancel-scan-btn already reset the screen
       pollJob();
     } catch (e) {
       $("scan-error").textContent = e.message;
