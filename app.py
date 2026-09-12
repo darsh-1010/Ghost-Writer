@@ -50,6 +50,29 @@ KEY_ENV_VAR = {
     "openrouter": "OPENROUTER_API_KEY",
 }
 
+# Mirrors webapp/index.html's PROVIDER_DEFAULTS — keep the two in sync if either changes.
+PROVIDER_MODEL_DEFAULTS = {
+    "anthropic": (sr.DEFAULT_MODEL, sr.DEFAULT_FAST_MODEL),
+    "openai": ("gpt-4o", "gpt-4o-mini"),
+    "gemini": ("gemini-2.0-flash", "gemini-2.0-flash"),
+    "openrouter": ("deepseek/deepseek-chat", "deepseek/deepseek-chat"),
+}
+
+
+def _autodetect_configured_provider() -> None:
+    """A key remembered via "remember this key on this device" (or one just exported
+    in the shell) is already sitting in the environment after load_dotenv() runs — but
+    until now nothing ever checked for it, so the app always came up on the "configure
+    a provider" screen even when it had everything it needed. Checks in the same
+    priority order as the provider grid; first one with a key wins."""
+    for provider in ("anthropic", "openai", "gemini", "openrouter"):
+        if os.environ.get(KEY_ENV_VAR[provider]):
+            STATE["provider"] = provider
+            STATE["model"], STATE["fast_model"] = PROVIDER_MODEL_DEFAULTS[provider]
+            STATE["configured"] = True
+            log.info("auto-configured provider=%s from an already-set %s", provider, KEY_ENV_VAR[provider])
+            return
+
 
 def _run_scan_job(
     job_id: str, project_path: Path, sessions_n: int, provider: str, model: str, fast_model: str, security: bool = False,
@@ -270,16 +293,23 @@ class Handler(BaseHTTPRequestHandler):
             return self._error(400, f"unknown provider: {provider}")
 
         with STATE_LOCK:
+            # A key already sitting in the environment (loaded from .env at startup
+            # because "remember" was checked last time, or exported in the shell) is
+            # just as valid as one freshly typed into the field — don't force a
+            # re-paste of a key that's already there. Only error if there's truly
+            # none anywhere. Checked BEFORE mutating STATE, so a rejected save
+            # doesn't leave the server thinking it's configured when it isn't.
+            api_key = (body.get("api_key") or "").strip() or os.environ.get(KEY_ENV_VAR.get(provider, ""), "")
+            if provider != "ollama" and not api_key:
+                return self._error(400, f"{provider} needs an API key")
+
             STATE["provider"] = provider
             STATE["model"] = body.get("model") or STATE["model"]
             STATE["fast_model"] = body.get("fast_model") or STATE["fast_model"]
             STATE["ollama_host"] = body.get("ollama_host") or STATE["ollama_host"]
             STATE["configured"] = True
             os.environ["OLLAMA_HOST"] = STATE["ollama_host"]
-            api_key = (body.get("api_key") or "").strip()
             if provider != "ollama":
-                if not api_key:
-                    return self._error(400, f"{provider} needs an API key")
                 os.environ[KEY_ENV_VAR[provider]] = api_key
                 if body.get("remember"):
                     sr.save_env_var(KEY_ENV_VAR[provider], api_key)
@@ -417,6 +447,7 @@ def main(argv: list[str] | None = None) -> int:
 
     logging.basicConfig(level=logging.DEBUG if args.verbose else logging.INFO, format="%(asctime)s %(levelname)-7s %(message)s", datefmt="%H:%M:%S")
     sr.load_dotenv()
+    _autodetect_configured_provider()
 
     # 127.0.0.1 only, never 0.0.0.0 — this process ends up holding a live API
     # key in memory, and it has no auth of its own. It must never be reachable

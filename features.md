@@ -51,7 +51,11 @@ OpenRouter (access to open-weight coding models like GLM/DeepSeek/Qwen/Kimi
 K2 through one key), and enter a key (skip this for Ollama, unless you also
 want its optional web-search key) — a settings panel you can come back to
 and switch any time, not a one-time gate. A dot at the bottom of the icon
-rail lights up once a provider is configured.
+rail lights up once a provider is configured. Checking "remember this key
+on this device" writes it to `.env` next to the script — the app now
+auto-detects that key on its next launch and comes up already configured,
+so the setup screen only shows up when there's genuinely no key anywhere
+yet, not every time you restart it.
 
 ### Analytics
 
