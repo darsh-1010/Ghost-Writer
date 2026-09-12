@@ -17,6 +17,7 @@ import sys
 import time
 import urllib.error
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -949,6 +950,44 @@ def extract_candidates(session_text: str, model: str, provider: str = "auto", pr
     return text
 
 
+# Extraction is one model call PER SESSION, and each call is fully independent of
+# every other one — but until now they ran one at a time, so a 10-session scan paid
+# 10x a round-trip's latency back to back. That serial loop, not synthesis, is the
+# actual reason a single-repo scan feels slow. It's pure I/O wait (network), so a
+# thread pool is enough — no async rewrite of the whole pipeline needed, and it works
+# identically underneath every provider's HTTP call (raw urllib or the Anthropic SDK).
+MAX_CONCURRENT_EXTRACTIONS = int(os.environ.get("MAX_CONCURRENT_EXTRACTIONS", "5"))
+# ponytail: one global worker cap, not per-provider rate-limit awareness — lower it
+# via the env var on a strict-tier key, raise it if your provider/hardware can take
+# more. Ollama specifically defaults to 1 request at a time SERVER-SIDE regardless of
+# this setting (its own OLLAMA_NUM_PARALLEL, default 1-4) — raise that too, on the
+# machine running `ollama serve`, or these just queue there with no speedup.
+
+
+def extract_candidates_parallel(
+    sessions: dict[str, str], model: str, provider: str = "auto", prompt_template: str = EXTRACT_PROMPT,
+) -> dict[str, str]:
+    """Runs extract_candidates() for every session at once instead of one at a time.
+    Preserves `sessions`' original order in the result (not completion order) so
+    downstream output — and which "most recent first" position each session shows up
+    in for the model — doesn't depend on which network call happened to finish first."""
+    if not sessions:
+        return {}
+    t0 = time.monotonic()
+    with ThreadPoolExecutor(max_workers=min(MAX_CONCURRENT_EXTRACTIONS, len(sessions))) as pool:
+        futures = {
+            name: pool.submit(extract_candidates, text, model, provider, prompt_template)
+            for name, text in sessions.items()
+        }
+        results = {name: future.result() for name, future in futures.items()}  # re-raises on failure, same as before
+    log.info(
+        "extracted from %d session(s) in %.1fs (up to %d concurrent call%s)",
+        len(sessions), time.monotonic() - t0, min(MAX_CONCURRENT_EXTRACTIONS, len(sessions)),
+        "" if MAX_CONCURRENT_EXTRACTIONS == 1 else "s",
+    )
+    return results
+
+
 def build_synthesis_prompt(candidates: dict[str, str], n: int, prompt_template: str = SYNTHESIS_PROMPT) -> str:
     parts = [prompt_template.format(n=n)]
     for filename, text in candidates.items():
@@ -1474,7 +1513,7 @@ def main(argv: list[str] | None = None) -> int:
 
     try:
         log.info("extracting candidates from %d session(s)...", len(sessions))
-        candidates = {name: extract_candidates(text, args.fast_model, args.provider) for name, text in sessions.items()}
+        candidates = extract_candidates_parallel(sessions, args.fast_model, args.provider)
         synthesis_prompt = build_synthesis_prompt(candidates, len(chosen))
         log.info("synthesizing report...")
         raw_report = synthesize(synthesis_prompt, args.model, provider=args.provider)
@@ -1482,10 +1521,7 @@ def main(argv: list[str] | None = None) -> int:
         sec_suggestions: list[Suggestion] = []
         if args.security:
             log.info("running security-pattern pass on %d session(s)...", len(sessions))
-            sec_candidates = {
-                name: extract_candidates(text, args.fast_model, args.provider, SECURITY_EXTRACT_PROMPT)
-                for name, text in sessions.items()
-            }
+            sec_candidates = extract_candidates_parallel(sessions, args.fast_model, args.provider, SECURITY_EXTRACT_PROMPT)
             sec_prompt = build_synthesis_prompt(sec_candidates, len(chosen), SECURITY_SYNTHESIS_PROMPT)
             sec_raw_report = synthesize(sec_prompt, args.model, provider=args.provider)
             sec_report = verify_quotes(sec_raw_report, sessions)

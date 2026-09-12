@@ -67,7 +67,7 @@ def _run_scan_job(
         sessions = {ref.name: sr.trim_session(ref) for ref in chosen}
 
         job["status"] = "extracting"
-        candidates = {name: sr.extract_candidates(text, fast_model, provider) for name, text in sessions.items()}
+        candidates = sr.extract_candidates_parallel(sessions, fast_model, provider)
         prompt = sr.build_synthesis_prompt(candidates, len(chosen))
 
         job["status"] = "synthesizing"
@@ -78,10 +78,7 @@ def _run_scan_job(
 
         if security:
             job["status"] = "extracting_security"
-            sec_candidates = {
-                name: sr.extract_candidates(text, fast_model, provider, sr.SECURITY_EXTRACT_PROMPT)
-                for name, text in sessions.items()
-            }
+            sec_candidates = sr.extract_candidates_parallel(sessions, fast_model, provider, sr.SECURITY_EXTRACT_PROMPT)
             sec_prompt = sr.build_synthesis_prompt(sec_candidates, len(chosen), sr.SECURITY_SYNTHESIS_PROMPT)
             job["status"] = "synthesizing_security"
             sec_raw_report = sr.synthesize(sec_prompt, model, provider=provider)

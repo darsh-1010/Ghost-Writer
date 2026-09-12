@@ -47,6 +47,13 @@ extracts candidate mistakes per-session before a stronger model clusters
 them across sessions and writes suggestions — cutting what the expensive
 model reads by ~50% with no loss in accuracy. Every quote gets tagged
 `✓ verified` or flagged if it isn't found verbatim in your real transcript.
+Per-session extraction runs concurrently (`MAX_CONCURRENT_EXTRACTIONS`,
+default 5) instead of one session at a time — that serial loop, not
+synthesis, was the main reason a single-repo scan felt slow. Ollama is the
+one exception worth knowing: it defaults to handling 1 request at a time
+*server-side* regardless of this setting, so raise `OLLAMA_NUM_PARALLEL` on
+the machine running `ollama serve` too if you want local scans to actually
+speed up rather than just queue.
 
 Supports Anthropic, OpenAI, Gemini, local Ollama, and OpenRouter models
 (`--provider`). Synthesis is web-search-backed on every one of them — each

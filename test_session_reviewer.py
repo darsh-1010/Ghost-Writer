@@ -424,6 +424,55 @@ class TestSynthesizeProviderDispatch(unittest.TestCase):
         self.assertEqual(len(calls), 1)
 
 
+class TestExtractCandidatesParallel(unittest.TestCase):
+    """Extraction used to run one session at a time — this is the fix for that."""
+
+    def test_empty_sessions_short_circuits(self):
+        self.assertEqual(sr.extract_candidates_parallel({}, "model"), {})
+
+    def test_calls_extract_candidates_once_per_session_with_right_args(self):
+        calls = []
+
+        def fake_extract(text, model, provider, prompt_template):
+            calls.append((text, model, provider, prompt_template))
+            return f"candidates-for-{text}"
+
+        sessions = {"a.jsonl": "text-a", "b.jsonl": "text-b", "c.jsonl": "text-c"}
+        with unittest.mock.patch.object(sr, "extract_candidates", fake_extract):
+            results = sr.extract_candidates_parallel(sessions, "haiku", "anthropic", sr.SECURITY_EXTRACT_PROMPT)
+
+        self.assertEqual(results, {"a.jsonl": "candidates-for-text-a", "b.jsonl": "candidates-for-text-b", "c.jsonl": "candidates-for-text-c"})
+        self.assertEqual(list(results.keys()), list(sessions.keys()))  # order preserved, not completion order
+        self.assertEqual(len(calls), 3)
+        for text, model, provider, prompt_template in calls:
+            self.assertEqual(model, "haiku")
+            self.assertEqual(provider, "anthropic")
+            self.assertEqual(prompt_template, sr.SECURITY_EXTRACT_PROMPT)
+
+    def test_runs_concurrently_not_serially(self):
+        """3 sessions each 'taking' 0.2s should finish in well under 3x0.2s if parallel."""
+        import time as time_mod
+
+        def slow_extract(text, model, provider, prompt_template):
+            time_mod.sleep(0.2)
+            return text
+
+        sessions = {f"s{i}.jsonl": f"t{i}" for i in range(5)}
+        t0 = time_mod.monotonic()
+        with unittest.mock.patch.object(sr, "extract_candidates", slow_extract):
+            sr.extract_candidates_parallel(sessions, "model", "anthropic")
+        elapsed = time_mod.monotonic() - t0
+        self.assertLess(elapsed, 0.6)  # serial would be ~1.0s; parallel (5 workers) should be ~0.2s
+
+    def test_a_single_failure_propagates(self):
+        def failing_extract(text, model, provider, prompt_template):
+            raise RuntimeError("boom")
+
+        with unittest.mock.patch.object(sr, "extract_candidates", failing_extract):
+            with self.assertRaises(RuntimeError):
+                sr.extract_candidates_parallel({"a.jsonl": "t"}, "model")
+
+
 class TestOllamaWebSearch(unittest.TestCase):
     """Ollama's local model has no search of its own — it emits a tool_call and WE
     make the actual request to ollama.com's hosted search API on its behalf."""
