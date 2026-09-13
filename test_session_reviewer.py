@@ -416,10 +416,27 @@ class TestSynthesizeProviderDispatch(unittest.TestCase):
         self.assertEqual(result, "ok")
         self.assertEqual(len(calls), 1)
 
-    def test_openrouter_routes_to_online_suffix_search(self):
+    def test_openrouter_search_is_off_by_default(self):
+        """Unlike Anthropic/OpenAI/Gemini, OpenRouter's web search costs money even on
+        a free model — so it must NOT run unless explicitly opted into, to avoid a
+        surprise 402 on a $0-balance account doing a plain scan."""
+        os.environ.pop("OPENROUTER_ENABLE_SEARCH", None)
         calls = []
-        with unittest.mock.patch.object(sr, "_openrouter_search_complete", lambda *a, **k: (calls.append(a) or ("ok", 1, 1))):
-            result = sr.synthesize("prompt", "deepseek/deepseek-chat", provider="openrouter")
+        with unittest.mock.patch.object(sr, "_openrouter_complete", lambda *a, **k: (calls.append(a) or ("ok", 1, 1))):
+            with unittest.mock.patch.object(sr, "_openrouter_search_complete") as mock_search:
+                result = sr.synthesize("prompt", "openrouter/free", provider="openrouter")
+        self.assertEqual(result, "ok")
+        self.assertEqual(len(calls), 1)
+        mock_search.assert_not_called()
+
+    def test_openrouter_routes_to_online_suffix_search_when_opted_in(self):
+        os.environ["OPENROUTER_ENABLE_SEARCH"] = "1"
+        try:
+            calls = []
+            with unittest.mock.patch.object(sr, "_openrouter_search_complete", lambda *a, **k: (calls.append(a) or ("ok", 1, 1))):
+                result = sr.synthesize("prompt", "deepseek/deepseek-chat", provider="openrouter")
+        finally:
+            del os.environ["OPENROUTER_ENABLE_SEARCH"]
         self.assertEqual(result, "ok")
         self.assertEqual(len(calls), 1)
 
@@ -695,6 +712,34 @@ class TestOpenRouterComplete(unittest.TestCase):
         with self.assertRaises(RuntimeError):
             sr._openrouter_complete("deepseek/deepseek-chat", "hi", max_tokens=10)
 
+    def test_402_surfaces_a_clear_message_not_a_raw_http_error(self):
+        """The actual bug report this fixes: a paid model with a $0 balance 402s on
+        EVERY call — the raw urllib.error.HTTPError gave no hint why. This should
+        come back as a RuntimeError naming the real cause and the fix."""
+        import io
+        import urllib.error as urlerror
+        import urllib.request as ur
+
+        def fake_urlopen(req, timeout=None):
+            raise urlerror.HTTPError(req.full_url, 402, "Payment Required", {}, io.BytesIO(b"{}"))
+
+        os.environ["OPENROUTER_API_KEY"] = "sk-or-test"
+        try:
+            real_urlopen = ur.urlopen
+            ur.urlopen = fake_urlopen
+            try:
+                with self.assertRaises(RuntimeError) as ctx:
+                    sr._openrouter_complete("deepseek/deepseek-chat", "hi", max_tokens=10)
+            finally:
+                ur.urlopen = real_urlopen
+        finally:
+            del os.environ["OPENROUTER_API_KEY"]
+
+        message = str(ctx.exception)
+        self.assertIn("402", message)
+        self.assertIn("openrouter.ai/credits", message)
+        self.assertIn("openrouter/free", message)
+
 
 class TestDiscoverProjects(unittest.TestCase):
     def test_groups_sessions_by_project_across_harnesses(self):
@@ -760,6 +805,40 @@ class TestReviseSuggestion(unittest.TestCase):
         self.assertIn("some real quote", revised.block)  # evidence carried through from the ORIGINAL block
         self.assertNotIn("a fabricated quote", revised.block)  # never taken from the model's reply
         self.assertNotEqual(revised.key, original.key)
+
+
+class TestOpenAIStyleCompleteNullContent(unittest.TestCase):
+    """Found via live testing against OpenRouter's free-model router: a verbose
+    reasoning model can spend its whole max_tokens budget on "reasoning" and leave
+    content: null (not missing, actually null) — must degrade to empty text, not crash."""
+
+    def test_null_content_becomes_empty_string_not_a_crash(self):
+        class FakeResponse:
+            def read(self):
+                return json.dumps({
+                    "choices": [{"message": {"role": "assistant", "content": None, "reasoning": "...thinking..."}}],
+                    "usage": {"prompt_tokens": 10, "completion_tokens": 5},
+                }).encode()
+
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+        os.environ["OPENAI_API_KEY"] = "sk-test"
+        try:
+            import urllib.request as ur
+            real_urlopen = ur.urlopen
+            ur.urlopen = lambda req, timeout=None: FakeResponse()
+            try:
+                text, in_tok, out_tok = sr._openai_complete("gpt-4o", "hi", max_tokens=10)
+            finally:
+                ur.urlopen = real_urlopen
+        finally:
+            del os.environ["OPENAI_API_KEY"]
+        self.assertEqual(text, "")
+        self.assertEqual((in_tok, out_tok), (10, 5))
 
 
 class TestOpenAIComplete(unittest.TestCase):

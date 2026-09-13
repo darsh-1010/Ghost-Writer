@@ -180,7 +180,12 @@ and trimming (raw bytes → characters actually sent).
 - OpenRouter in particular is the practical way to try the current best
   open-weight coding models (GLM, DeepSeek, Qwen, Kimi K2, ...) without
   self-hosting a multi-GPU cluster — one `OPENROUTER_API_KEY` reaches all
-  of them.
+  of them. The app defaults its OpenRouter model to `openrouter/free`
+  (OpenRouter's own permanently-free auto-router, no card needed) rather
+  than a specific paid model — most other IDs there cost money, and with a
+  $0 account balance a paid model fails **every** call with `402 Payment
+  Required`, which this tool now surfaces as a clear message pointing at
+  `openrouter.ai/credits` instead of a raw HTTP error.
 
 ## 7. Web-backed suggestions
 
@@ -196,7 +201,11 @@ Ollama's own hosted search at `ollama.com/api/web_search` — the one case
 where *we* run the tool-call loop client-side (opt-in, free `OLLAMA_API_KEY`
 from your Ollama account, separate from `OLLAMA_HOST`) since Ollama has no
 search of its own for a local model to call. Skip the Ollama key and
-synthesis still runs, just without a **Web source** line.
+synthesis still runs, just without a **Web source** line. OpenRouter's
+search is opt-in too, for a different reason: it costs money even on a free
+model, so it stays off unless `OPENROUTER_ENABLE_SEARCH=1` is set — turning
+it on with a $0 balance is the other common way to hit `402 Payment
+Required` there, on top of picking a paid model with no credits.
 
 ## 8. Remembers what it already told you
 

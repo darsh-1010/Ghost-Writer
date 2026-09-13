@@ -589,9 +589,10 @@ def resolve_provider(explicit: str, model: str) -> str:
 def _openai_style_complete(
     model: str, prompt: str, max_tokens: int, url: str, api_key: str, extra_body: dict | None = None,
 ) -> tuple[str, int, int]:
-    """Shared by OpenAI and Ollama — Ollama's /v1/chat/completions is byte-for-byte
-    OpenAI-compatible (Ollama's own docs), so one function serves both.
-    extra_body is Ollama-only (its "options" block, e.g. num_ctx) — never sent to OpenAI."""
+    """Shared by OpenAI, Ollama, and OpenRouter — all three speak the same
+    /chat/completions request/response shape (Ollama and OpenRouter both say so in
+    their own docs), so one function serves all three.
+    extra_body is Ollama-only (its "options" block, e.g. num_ctx) — never sent to OpenAI/OpenRouter."""
     body = json.dumps({
         "model": model,
         "messages": [{"role": "user", "content": prompt}],
@@ -603,9 +604,24 @@ def _openai_style_complete(
         headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
         method="POST",
     )
-    with urllib.request.urlopen(req, timeout=120) as resp:
-        data = json.loads(resp.read())
-    text = data["choices"][0]["message"]["content"].strip()
+    try:
+        with urllib.request.urlopen(req, timeout=120) as resp:
+            data = json.loads(resp.read())
+    except urllib.error.HTTPError as e:
+        if e.code == 402:
+            raise RuntimeError(
+                f"{url} returned 402 Payment Required for model {model!r} — the account behind this API key "
+                "has no credit. If this is OpenRouter: add credits at https://openrouter.ai/credits, or switch "
+                "the Synthesis/Extraction model to `openrouter/free` (OpenRouter's own zero-cost free-model "
+                "router — no card needed) instead of a paid model. Web search also costs extra even on free "
+                "models there, which is why it's off by default (OPENROUTER_ENABLE_SEARCH=1 to turn it on)."
+            ) from e
+        raise
+    # content can come back null (not just missing) — e.g. a verbose reasoning model
+    # spending its whole max_tokens budget on "reasoning" and leaving nothing for the
+    # actual answer, seen in practice with OpenRouter's free-model router. Treat that
+    # as empty output rather than crashing; the pipeline already handles empty text.
+    text = (data["choices"][0]["message"].get("content") or "").strip()
     usage = data.get("usage") or {}
     return text, usage.get("prompt_tokens", 0), usage.get("completion_tokens", 0)
 
@@ -1041,8 +1057,20 @@ def synthesize(prompt: str, model: str, max_uses: int = 10, provider: str = "aut
         return text
 
     if resolved == "openrouter":
-        text, in_tok, out_tok = _openrouter_search_complete(model, prompt, max_tokens=8000)
-        log.info("synthesis done (%s, openrouter :online web search): input_tokens=%d, output_tokens=%d", model, in_tok, out_tok)
+        # Unlike Anthropic/OpenAI/Gemini's web search, OpenRouter's costs money even
+        # on a $0-balance account using an otherwise-free model ($4/1000 results) — so
+        # unlike those three, this is opt-in, not on by default, to avoid a 402 on a
+        # plain scan someone expected to be free. Same opt-in shape as Ollama's search.
+        if os.environ.get("OPENROUTER_ENABLE_SEARCH"):
+            text, in_tok, out_tok = _openrouter_search_complete(model, prompt, max_tokens=8000)
+            log.info("synthesis done (%s, openrouter :online web search): input_tokens=%d, output_tokens=%d", model, in_tok, out_tok)
+        else:
+            log.warning(
+                "openrouter web search is off by default (it costs extra even on free models) — "
+                "set OPENROUTER_ENABLE_SEARCH=1 to turn it on. See README.",
+            )
+            text, in_tok, out_tok = _openrouter_complete(model, prompt, max_tokens=8000)
+            log.info("synthesis done (%s, no web search): input_tokens=%d, output_tokens=%d", model, in_tok, out_tok)
         return text
 
     if resolved == "ollama":

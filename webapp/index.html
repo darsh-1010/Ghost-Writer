@@ -468,7 +468,7 @@ const PROVIDER_DEFAULTS = {
   openai: { model: "gpt-4o", fast_model: "gpt-4o-mini", keyPlaceholder: "sk-...", hint: "platform.openai.com — synthesis uses OpenAI's web_search tool (Responses API) for sourced suggestions" },
   gemini: { model: "gemini-2.0-flash", fast_model: "gemini-2.0-flash", keyPlaceholder: "AIza...", hint: "aistudio.google.com — synthesis uses Google Search grounding for sourced suggestions" },
   ollama: { model: "llama3.1", fast_model: "llama3.1" },
-  openrouter: { model: "deepseek/deepseek-chat", fast_model: "deepseek/deepseek-chat", keyPlaceholder: "sk-or-...", hint: "openrouter.ai/keys — one key for GLM, DeepSeek, Qwen, Kimi K2 and more; synthesis appends :online for sourced suggestions" },
+  openrouter: { model: "openrouter/free", fast_model: "openrouter/free", keyPlaceholder: "sk-or-...", hint: "openrouter.ai/keys — openrouter/free is OpenRouter's own zero-cost router (no card needed); switch to a paid model like deepseek/deepseek-chat for stronger results once you've added credits. Web search costs extra even on free models, so it's off unless you set OPENROUTER_ENABLE_SEARCH=1." },
 };
 
 let state = { provider: "anthropic", jobId: null, projectPath: null, pollTimer: null, projects: [] };

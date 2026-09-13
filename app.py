@@ -55,7 +55,7 @@ PROVIDER_MODEL_DEFAULTS = {
     "anthropic": (sr.DEFAULT_MODEL, sr.DEFAULT_FAST_MODEL),
     "openai": ("gpt-4o", "gpt-4o-mini"),
     "gemini": ("gemini-2.0-flash", "gemini-2.0-flash"),
-    "openrouter": ("deepseek/deepseek-chat", "deepseek/deepseek-chat"),
+    "openrouter": ("openrouter/free", "openrouter/free"),
 }
 
 

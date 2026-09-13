@@ -72,7 +72,17 @@ lower than Claude's — it's a more specialized judgment call than spotting
 workflow friction. OpenRouter is the practical way to point this at the
 current best open-weight coding models (GLM, DeepSeek, Qwen, Kimi K2, ...)
 without self-hosting a multi-GPU cluster — one `OPENROUTER_API_KEY`, model
-names like `deepseek/deepseek-chat` or `z-ai/glm-4.6`.
+names like `deepseek/deepseek-chat` or `z-ai/glm-4.6`. The app's default
+OpenRouter model is `openrouter/free` — OpenRouter's own permanently-free
+router that auto-selects among whichever models are currently free, no
+card needed — because most other model IDs there are paid, and **a paid
+model with a $0 account balance fails every single call with 402 Payment
+Required**, not just occasionally. Add credits at
+[openrouter.ai/credits](https://openrouter.ai/credits) to use a paid model
+instead. OpenRouter's web search also costs extra even on a free model
+($4 per 1,000 results), so — unlike the other three providers — it's off
+by default there; set `OPENROUTER_ENABLE_SEARCH=1` to turn it on once
+you've funded the account.
 Full breakdown of what's supported, the safety guardrails, and every flag →
 **[features.md](features.md)**.
 
