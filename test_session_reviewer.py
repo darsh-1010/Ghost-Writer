@@ -4,6 +4,7 @@ import os
 import tempfile
 import unittest
 import unittest.mock
+import urllib.error
 from pathlib import Path
 
 import session_reviewer as sr
@@ -805,6 +806,91 @@ class TestReviseSuggestion(unittest.TestCase):
         self.assertIn("some real quote", revised.block)  # evidence carried through from the ORIGINAL block
         self.assertNotIn("a fabricated quote", revised.block)  # never taken from the model's reply
         self.assertNotEqual(revised.key, original.key)
+
+
+class TestHTTPTimeout(unittest.TestCase):
+    """The actual bug report this fixes: a raw `TimeoutError: The read operation
+    timed out` reaching the user with no explanation — free-tier/local models can be
+    genuinely slower than a paid cloud model, so this should be a clear message, not
+    a crash, and the default timeout should be generous enough to reduce the odds of
+    hitting it in the first place."""
+
+    def test_default_timeout_is_generous(self):
+        # HTTP_TIMEOUT_SECONDS is read once at import time; this asserts the default
+        # this process actually started with, not a fresh re-read of the env var.
+        self.assertGreaterEqual(sr.HTTP_TIMEOUT_SECONDS, 180)
+
+    def test_openai_style_complete_surfaces_clear_timeout_message(self):
+        # Deliberately socket.timeout, not bare TimeoutError: that's what urllib
+        # actually raises, and the two are DIFFERENT classes before Python 3.10 — a
+        # test that mocked TimeoutError here would pass even if the real fix were
+        # broken (this exact gap is why the first version of this fix didn't work).
+        import socket
+
+        def fake_urlopen(req, timeout=None):
+            raise socket.timeout("The read operation timed out")
+
+        os.environ["OPENROUTER_API_KEY"] = "sk-or-test"
+        try:
+            import urllib.request as ur
+            real_urlopen = ur.urlopen
+            ur.urlopen = fake_urlopen
+            try:
+                with self.assertRaises(RuntimeError) as ctx:
+                    sr._openrouter_complete("openrouter/free", "hi", max_tokens=10)
+            finally:
+                ur.urlopen = real_urlopen
+        finally:
+            del os.environ["OPENROUTER_API_KEY"]
+
+        message = str(ctx.exception)
+        self.assertIn("timed out", message)
+        self.assertIn("HTTP_TIMEOUT_SECONDS", message)
+        self.assertIn("openrouter/free", message)
+
+    def test_urlerror_wrapped_timeout_also_surfaces_clear_message(self):
+        """A third real shape found live: a connect/TLS-handshake-stage timeout comes
+        back as urllib.error.URLError wrapping the timeout in .reason, not raised
+        directly — this is the one that actually slipped through the first two fixes."""
+        import socket
+
+        def fake_urlopen(req, timeout=None):
+            raise urllib.error.URLError(socket.timeout("_ssl.c:1112: The handshake operation timed out"))
+
+        os.environ["OPENROUTER_API_KEY"] = "sk-or-test"
+        try:
+            import urllib.request as ur
+            real_urlopen = ur.urlopen
+            ur.urlopen = fake_urlopen
+            try:
+                with self.assertRaises(RuntimeError) as ctx:
+                    sr._openrouter_complete("openrouter/free", "hi", max_tokens=10)
+            finally:
+                ur.urlopen = real_urlopen
+        finally:
+            del os.environ["OPENROUTER_API_KEY"]
+
+        self.assertIn("timed out", str(ctx.exception))
+        self.assertIn("HTTP_TIMEOUT_SECONDS", str(ctx.exception))
+
+    def test_non_timeout_urlerror_is_not_swallowed(self):
+        """A genuine non-timeout connection failure (DNS, refused, ...) must still
+        propagate as itself, not get mislabeled as a timeout."""
+        def fake_urlopen(req, timeout=None):
+            raise urllib.error.URLError("Name or service not known")
+
+        os.environ["OPENROUTER_API_KEY"] = "sk-or-test"
+        try:
+            import urllib.request as ur
+            real_urlopen = ur.urlopen
+            ur.urlopen = fake_urlopen
+            try:
+                with self.assertRaises(urllib.error.URLError):
+                    sr._openrouter_complete("openrouter/free", "hi", max_tokens=10)
+            finally:
+                ur.urlopen = real_urlopen
+        finally:
+            del os.environ["OPENROUTER_API_KEY"]
 
 
 class TestOpenAIStyleCompleteNullContent(unittest.TestCase):

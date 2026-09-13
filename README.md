@@ -82,7 +82,12 @@ Required**, not just occasionally. Add credits at
 instead. OpenRouter's web search also costs extra even on a free model
 ($4 per 1,000 results), so — unlike the other three providers — it's off
 by default there; set `OPENROUTER_ENABLE_SEARCH=1` to turn it on once
-you've funded the account.
+you've funded the account. Every HTTP-based call (OpenAI, Ollama,
+OpenRouter, Gemini) shares one `HTTP_TIMEOUT_SECONDS` (default 180) — raise
+it if a free-tier or local model keeps timing out rather than assuming
+something's broken; free-tier routers share congested capacity and a local
+model is bounded by your hardware. A timeout now surfaces as a clear
+message naming the model and timeout, not a raw `socket.timeout`/`URLError`.
 Full breakdown of what's supported, the safety guardrails, and every flag →
 **[features.md](features.md)**.
 

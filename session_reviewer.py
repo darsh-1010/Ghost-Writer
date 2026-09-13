@@ -12,6 +12,7 @@ import json
 import logging
 import os
 import re
+import socket
 import subprocess
 import sys
 import time
@@ -29,6 +30,37 @@ MAX_CHARS_PER_SESSION = 20_000  # hard cap so one huge session can't blow the pr
 DEFAULT_MODEL = "claude-sonnet-5"          # synthesis: clusters candidates, writes suggestions, web-searches
 DEFAULT_FAST_MODEL = "claude-haiku-4-5-20251001"  # extraction: reads raw transcripts, ~1/2 the price of DEFAULT_MODEL
 DEFAULT_SESSION_COUNT = 10
+HTTP_TIMEOUT_SECONDS = int(os.environ.get("HTTP_TIMEOUT_SECONDS", "180"))
+# ponytail: one global timeout knob, not per-provider tuning — free-tier/local models
+# can be genuinely slower than a paid cloud model (OpenRouter's free router shares
+# congested capacity; a local Ollama model is bounded by your hardware), so raise
+# this env var if you keep seeing timeouts rather than assuming something's broken.
+
+
+def _timeout_error(url: str, model: str, seconds: int) -> RuntimeError:
+    return RuntimeError(
+        f"Request to {url} for model {model!r} timed out after {seconds}s with no response. Free-tier/local "
+        "models can be slower than a paid cloud model — OpenRouter's free router shares congested capacity, "
+        "a local Ollama model is bounded by your hardware. Set HTTP_TIMEOUT_SECONDS to wait longer, or switch "
+        "to a faster/paid model."
+    )
+
+
+def _is_timeout(exc: BaseException) -> bool:
+    """urllib raises a timeout in three different shapes depending on exactly when it
+    happens and the Python version: a bare socket.timeout mid-read (a distinct class
+    from TimeoutError before Python 3.10 — both are checked for), or a
+    urllib.error.URLError wrapping either of those in .reason for a connect/TLS-
+    handshake-stage timeout. One place to recognize all three, so every call site
+    below gets the same clear message instead of three different raw exceptions."""
+    if isinstance(exc, (socket.timeout, TimeoutError)):
+        return True
+    if isinstance(exc, urllib.error.URLError):
+        reason = exc.reason
+        return isinstance(reason, (socket.timeout, TimeoutError)) or "timed out" in str(reason).lower()
+    return False
+
+
 DEFAULT_HARNESSES = "claude-code,codex,antigravity"
 
 log = logging.getLogger("session_reviewer")
@@ -605,7 +637,7 @@ def _openai_style_complete(
         method="POST",
     )
     try:
-        with urllib.request.urlopen(req, timeout=120) as resp:
+        with urllib.request.urlopen(req, timeout=HTTP_TIMEOUT_SECONDS) as resp:
             data = json.loads(resp.read())
     except urllib.error.HTTPError as e:
         if e.code == 402:
@@ -616,6 +648,10 @@ def _openai_style_complete(
                 "router — no card needed) instead of a paid model. Web search also costs extra even on free "
                 "models there, which is why it's off by default (OPENROUTER_ENABLE_SEARCH=1 to turn it on)."
             ) from e
+        raise
+    except (socket.timeout, TimeoutError, urllib.error.URLError) as e:
+        if _is_timeout(e):
+            raise _timeout_error(url, model, HTTP_TIMEOUT_SECONDS) from e
         raise
     # content can come back null (not just missing) — e.g. a verbose reasoning model
     # spending its whole max_tokens budget on "reasoning" and leaving nothing for the
@@ -717,8 +753,13 @@ def _ollama_web_search(query: str, api_key: str, max_results: int = 5) -> list[d
         headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
         method="POST",
     )
-    with urllib.request.urlopen(req, timeout=30) as resp:
-        data = json.loads(resp.read())
+    try:
+        with urllib.request.urlopen(req, timeout=HTTP_TIMEOUT_SECONDS) as resp:
+            data = json.loads(resp.read())
+    except (socket.timeout, TimeoutError, urllib.error.URLError) as e:
+        if _is_timeout(e):
+            raise _timeout_error("https://ollama.com/api/web_search", query, HTTP_TIMEOUT_SECONDS) from e
+        raise
     return data.get("results", [])
 
 
@@ -740,8 +781,13 @@ def _ollama_search_complete(
             headers={"Authorization": "Bearer ollama", "Content-Type": "application/json"},
             method="POST",
         )
-        with urllib.request.urlopen(req, timeout=180) as resp:
-            data = json.loads(resp.read())
+        try:
+            with urllib.request.urlopen(req, timeout=HTTP_TIMEOUT_SECONDS) as resp:
+                data = json.loads(resp.read())
+        except (socket.timeout, TimeoutError, urllib.error.URLError) as e:
+            if _is_timeout(e):
+                raise _timeout_error(f"{host}/v1/chat/completions", model, HTTP_TIMEOUT_SECONDS) from e
+            raise
         usage = data.get("usage") or {}
         total_in += usage.get("prompt_tokens", 0)
         total_out += usage.get("completion_tokens", 0)
@@ -789,8 +835,20 @@ def _gemini_complete(model: str, prompt: str, max_tokens: int, search: bool = Fa
         headers={"x-goog-api-key": api_key, "Content-Type": "application/json"},
         method="POST",
     )
-    with urllib.request.urlopen(req, timeout=180 if search else 120) as resp:
-        data = json.loads(resp.read())
+    try:
+        with urllib.request.urlopen(req, timeout=HTTP_TIMEOUT_SECONDS) as resp:
+            data = json.loads(resp.read())
+    except urllib.error.HTTPError as e:
+        if e.code == 402:
+            raise RuntimeError(
+                f"{url} returned 402 Payment Required for model {model!r} — the account behind this API key "
+                "has no credit or isn't set up for billing."
+            ) from e
+        raise
+    except (socket.timeout, TimeoutError, urllib.error.URLError) as e:
+        if _is_timeout(e):
+            raise _timeout_error(url, model, HTTP_TIMEOUT_SECONDS) from e
+        raise
     text = "".join(p.get("text", "") for p in data["candidates"][0]["content"]["parts"]).strip()
     usage = data.get("usageMetadata") or {}
     return text, usage.get("promptTokenCount", 0), usage.get("candidatesTokenCount", 0)
@@ -817,8 +875,20 @@ def _openai_search_complete(model: str, prompt: str, max_tokens: int) -> tuple[s
         headers={"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"},
         method="POST",
     )
-    with urllib.request.urlopen(req, timeout=180) as resp:
-        data = json.loads(resp.read())
+    try:
+        with urllib.request.urlopen(req, timeout=HTTP_TIMEOUT_SECONDS) as resp:
+            data = json.loads(resp.read())
+    except urllib.error.HTTPError as e:
+        if e.code == 402:
+            raise RuntimeError(
+                f"https://api.openai.com/v1/responses returned 402 Payment Required for model {model!r} — "
+                "the account behind this API key has no credit or isn't set up for billing."
+            ) from e
+        raise
+    except (socket.timeout, TimeoutError, urllib.error.URLError) as e:
+        if _is_timeout(e):
+            raise _timeout_error("https://api.openai.com/v1/responses", model, HTTP_TIMEOUT_SECONDS) from e
+        raise
     text = "".join(
         part.get("text", "")
         for item in data.get("output", []) if item.get("type") == "message"
